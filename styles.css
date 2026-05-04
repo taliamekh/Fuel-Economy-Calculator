@@ -2144,3 +2144,16 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.015em; }
   border-top: 1px solid var(--border);
 }
 .weather-summary strong { color: var(--accent); }
+
+/* ============== Weather: per-sample time badge (forecast mode) ============== */
+.weather-where { display: flex; flex-direction: column; align-items: flex-start; }
+.weather-when {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-fade);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  margin-top: 2px;
+}
+.weather-summary small { color: var(--text-fade); font-size: 11px; line-height: 1.5; }

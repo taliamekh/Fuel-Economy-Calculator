@@ -592,6 +592,13 @@ function loadState() {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return;
     Object.assign(state, JSON.parse(raw));
+    // Defensive normalization — older saves may have null where we now expect
+    // arrays, or partial objects that crash code paths added later.
+    if (!Array.isArray(state.savedVehicles)) state.savedVehicles = [];
+    if (!Array.isArray(state.savedRoutes))   state.savedRoutes   = [];
+    if (state.conditions == null || typeof state.conditions !== 'object') {
+      state.conditions = { ac: false, roofRack: false, towing: false, mountainous: false, cold: false, poorRoads: false };
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -860,20 +867,64 @@ function describeWeatherCode(wc) {
   return ['🌥️', 'overcast'];
 }
 
-// Open-Meteo is free, key-less, and CORS-friendly. We sample current weather
-// at three points (start, middle, dest) so the user sees how conditions change
-// across the route. Returns { samples: [{label, lat, lon, tempC, ...}, ...],
-// midpoint } where midpoint is samples[1] (used by the fuel multiplier).
+// Open-Meteo is free, key-less, and CORS-friendly. Samples weather at three
+// points along the route (Start / Mid / End). If the user has set a departure
+// more than an hour in the future, we pull the HOURLY FORECAST closest to
+// the planned arrival time at each sample; otherwise we use current conditions.
+//
+// For the trip arrival time at each sample, we estimate by interpolating the
+// route's free-flow duration: start = departAt, end = departAt + duration,
+// mid = departAt + duration/2. Crude but better than using a single instant.
+//
+// Returns { samples: [{label, lat, lon, tempC, ..., forecast, forTime}], midpoint }.
 async function fetchRouteWeather(route) {
   const coords = route?.coords;
   if (!coords || coords.length < 2) return null;
+
+  const departTs = state.departAt ? new Date(state.departAt).getTime() : NaN;
+  const useForecast = isFinite(departTs) && departTs > Date.now() + 60 * 60 * 1000;
+  // Open-Meteo's free hourly forecast goes 16 days out — anything beyond that
+  // falls back to current weather (still better than nothing).
+  const horizonMs = 16 * 24 * 60 * 60 * 1000;
+  const inHorizon = useForecast && (departTs - Date.now() < horizonMs);
+  // Estimated free-flow duration (seconds). Mid sample lands at midpoint of trip.
+  const tripDurMs = (route.duration ?? 0) * 1000;
+
   const sampleAt = [
-    { label: 'Start',  i: 0 },
-    { label: 'Mid',    i: Math.floor(coords.length / 2) },
-    { label: 'End',    i: coords.length - 1 },
+    { label: 'Start', i: 0,                                  fracTime: 0 },
+    { label: 'Mid',   i: Math.floor(coords.length / 2),      fracTime: 0.5 },
+    { label: 'End',   i: coords.length - 1,                  fracTime: 1 },
   ];
-  const fetchOne = async ({ label, i }) => {
+
+  const fetchOne = async ({ label, i, fracTime }) => {
     const [lon, lat] = coords[i];
+    if (inHorizon) {
+      const targetMs = departTs + tripDurMs * fracTime;
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&hourly=temperature_2m,precipitation,wind_speed_10m,weather_code&wind_speed_unit=kmh&forecast_days=16`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const data = await res.json();
+        const times = data.hourly?.time || [];
+        if (times.length === 0) return null;
+        let bestIdx = 0, bestDiff = Infinity;
+        for (let k = 0; k < times.length; k++) {
+          const tMs = new Date(times[k]).getTime();
+          const diff = Math.abs(tMs - targetMs);
+          if (diff < bestDiff) { bestDiff = diff; bestIdx = k; }
+        }
+        return {
+          label, lat, lon,
+          forecast: true,
+          forTime: times[bestIdx],
+          tempC: data.hourly.temperature_2m?.[bestIdx],
+          precip: data.hourly.precipitation?.[bestIdx],
+          windKmh: data.hourly.wind_speed_10m?.[bestIdx],
+          weatherCode: data.hourly.weather_code?.[bestIdx],
+        };
+      } catch { return null; }
+    }
+    // Current weather path (default — no departure time, or it's now/past, or beyond 16d horizon).
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=temperature_2m,precipitation,wind_speed_10m,weather_code&wind_speed_unit=kmh`;
     try {
       const res = await fetch(url);
@@ -882,6 +933,8 @@ async function fetchRouteWeather(route) {
       const c = data.current || {};
       return {
         label, lat, lon,
+        forecast: false,
+        forTime: null,
         tempC: c.temperature_2m,
         precip: c.precipitation,
         windKmh: c.wind_speed_10m,
@@ -889,10 +942,9 @@ async function fetchRouteWeather(route) {
       };
     } catch { return null; }
   };
+
   const samples = (await Promise.all(sampleAt.map(fetchOne))).filter(Boolean);
   if (samples.length === 0) return null;
-  // Use the middle sample for the consumption multiplier — good enough since
-  // weather effects on fuel economy are roughly continuous across the trip.
   const midpoint = samples.find(s => s.label === 'Mid') || samples[Math.floor(samples.length / 2)];
   return { samples, midpoint };
 }
@@ -2009,7 +2061,11 @@ function attachListeners() {
   $('departAt').addEventListener('change', e => {
     state.departAt = e.target.value || null;
     saveState();
-    if (map.routes && map.routes.length > 0) renderRouteAlts();
+    invalidateRouteWeatherCache();
+    if (map.routes && map.routes.length > 0) {
+      renderRouteAlts();
+      applyRouteWeather(map.activeRoute);
+    }
   });
   $('departNowBtn').addEventListener('click', () => {
     const d = new Date();
@@ -2020,7 +2076,11 @@ function attachListeners() {
     $('departAt').value = localISO;
     state.departAt = localISO;
     saveState();
-    if (map.routes && map.routes.length > 0) renderRouteAlts();
+    invalidateRouteWeatherCache();
+    if (map.routes && map.routes.length > 0) {
+      renderRouteAlts();
+      applyRouteWeather(map.activeRoute);
+    }
   });
 
   // Custom efficiency
@@ -3199,20 +3259,28 @@ async function applyRouteWeather(idx) {
     route.weather = w; // { samples: [...], midpoint: {...} } | null
   }
   if (idx !== map.activeRoute) return;
-  // state.routeWeather kept as the midpoint reading for the fuel multiplier and
-  // the trip-summary row; full samples drive the new "weather along your route" card.
   state.routeWeather = route.weather?.midpoint || null;
   state.routeWeatherSamples = route.weather?.samples || null;
   renderWeatherCard();
   update();
 }
 
+// Clears cached weather on every route so the next applyRouteWeather() call
+// re-fetches with the new departAt setting. Cheap — weather is small JSON.
+function invalidateRouteWeatherCache() {
+  for (const r of map.routes || []) {
+    delete r.weather;
+  }
+}
+
 // Render the right-column "Weather along your route" card with multi-point
 // samples. Hides the static Quick Tips card while a route is loaded so the
-// space is used for actually-relevant info.
+// space is used for actually-relevant info. Card title reflects whether we're
+// showing the current snapshot or a forecast at the chosen departure time.
 function renderWeatherCard() {
   const card  = $('weatherCard');
   const tips  = $('tipsCard');
+  const title = card?.querySelector('.tips-title');
   const body  = $('weatherForecastBody');
   const samples = state.routeWeatherSamples || [];
   if (!card || !body) return;
@@ -3225,18 +3293,39 @@ function renderWeatherCard() {
   card.hidden = false;
   if (tips) tips.hidden = true;
 
+  // Title: "Forecast for your departure" if forecast samples, else current snapshot.
+  const isForecast = !!samples[0]?.forecast;
+  if (title) {
+    if (isForecast) {
+      const t = samples[0].forTime ? new Date(samples[0].forTime) : null;
+      const dayLabel = t ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][t.getDay()] : '';
+      const dateLabel = t ? `${dayLabel} ${String(t.getMonth() + 1).padStart(2, '0')}/${String(t.getDate()).padStart(2, '0')} ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` : '';
+      title.textContent = `Forecast for ${dateLabel}`;
+    } else {
+      title.textContent = 'Weather along your route';
+    }
+  }
+
   // Compute the worst-case multiplier across all samples — a single midpoint
-  // reading underweights e.g. a snowstorm at the destination but clear at the
-  // start. Worst-of-three is conservative but honest for trip planning.
+  // reading underweights a snowstorm at the destination if the start was clear.
   const worstMult = samples.reduce((max, s) => Math.max(max, weatherFuelMultiplier(s)), 1.0);
   const worstPct = Math.round((worstMult - 1) * 100);
+
+  // For forecast mode, each sample's forTime differs (start-of-trip vs end-of-trip)
+  // so we surface the per-sample timestamp inline.
+  const fmtTime = iso => {
+    if (!iso) return '';
+    const t = new Date(iso);
+    return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  };
 
   const rowsHtml = samples.map(s => {
     const [emoji, label] = describeWeatherCode(s.weatherCode);
     const wind = isFinite(s.windKmh) && s.windKmh >= 15 ? ` · 💨 ${Math.round(s.windKmh)} km/h` : '';
+    const timeBadge = (s.forecast && s.forTime) ? `<span class="weather-when">${fmtTime(s.forTime)}</span>` : '';
     return `
       <div class="weather-row">
-        <span class="weather-where">${escapeHtml(s.label)}</span>
+        <span class="weather-where">${escapeHtml(s.label)}${timeBadge}</span>
         <span class="weather-emoji" aria-hidden="true">${emoji}</span>
         <span class="weather-temp">${Math.round(s.tempC)}°C</span>
         <span class="weather-cond">${escapeHtml(label)}${wind}</span>
@@ -3244,11 +3333,19 @@ function renderWeatherCard() {
     `;
   }).join('');
 
-  const summary = worstPct > 0
-    ? `<p class="weather-summary">Worst-case fuel impact along this route: <strong>+${worstPct}%</strong></p>`
-    : `<p class="weather-summary">No significant weather drag on fuel use.</p>`;
+  const summaryParts = [];
+  if (worstPct > 0) {
+    summaryParts.push(`Worst-case fuel impact along this route: <strong>+${worstPct}%</strong>.`);
+  } else {
+    summaryParts.push('No significant weather drag on fuel use.');
+  }
+  if (!isForecast && state.departAt) {
+    summaryParts.push('<br><small>Showing current weather — your departure is too soon or too far out for an hourly forecast.</small>');
+  } else if (!isForecast) {
+    summaryParts.push('<br><small>Pick a departure time above to see a forecast for your trip.</small>');
+  }
 
-  body.innerHTML = rowsHtml + summary;
+  body.innerHTML = rowsHtml + `<p class="weather-summary">${summaryParts.join(' ')}</p>`;
 }
 
 // Compute, cache, and apply a toll/ferry estimate for a route. If the user has
@@ -4005,4 +4102,27 @@ async function init() {
   render(); update();
 }
 
-document.addEventListener('DOMContentLoaded', init);
+// Wrap init in a guard so a corrupt localStorage entry from an older build
+// can't leave the user with an empty page and no recovery. If init throws,
+// we wipe state and try once more — a clean fresh load is always preferable
+// to a permanently broken site.
+async function safeInit() {
+  try {
+    await init();
+  } catch (err) {
+    console.error('init failed, clearing state and retrying', err);
+    try { localStorage.removeItem(LS_KEY); } catch {}
+    // Surface the issue so silent failures don't leave the page mysteriously blank.
+    try {
+      const main = document.querySelector('main');
+      if (main) {
+        const banner = document.createElement('div');
+        banner.style.cssText = 'background:#7f1d1d;color:#fff;padding:14px 18px;margin:14px;border-radius:10px;font:14px system-ui';
+        banner.innerHTML = '<strong>Recovering from a saved-state issue.</strong> The page will reload automatically. If you keep seeing this, hard-refresh with <kbd>Ctrl+Shift+R</kbd>.';
+        main.prepend(banner);
+      }
+    } catch {}
+    setTimeout(() => location.reload(), 1500);
+  }
+}
+document.addEventListener('DOMContentLoaded', safeInit);
