@@ -464,9 +464,9 @@
   },
   "CA_AB": {
     "regular": 1.765,
-    "mid": 1.952,
-    "premium": 2.1,
-    "diesel": 1.872,
+    "mid": 1.951,
+    "premium": 2.099,
+    "diesel": 1.871,
     "label": "Alberta avg",
     "history": [
       {
@@ -4305,9 +4305,9 @@
   },
   "CA_QC": {
     "regular": 1.901,
-    "mid": 2.074,
-    "premium": 2.211,
-    "diesel": 2,
+    "mid": 2.073,
+    "premium": 2.21,
+    "diesel": 1.999,
     "label": "Quebec avg",
     "history": [
       {
