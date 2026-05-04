@@ -292,17 +292,18 @@
           <input type="number" id="passengersInput" class="input num" inputmode="numeric" min="1" step="1" value="1">
         </label>
         <label class="field grow">
-          <span class="field-label" id="tankLabel">Tank size (litres) <small>optional</small></span>
+          <span class="field-label" id="tankLabel">Tank size (litres) <small>auto from vehicle</small></span>
           <input type="number" id="tankInput" class="input num" inputmode="decimal" min="0" step="any" placeholder="e.g. 46">
         </label>
         <label class="field grow">
-          <span class="field-label">Tolls / fees <small>optional</small></span>
+          <span class="field-label">Tolls / fees <small>auto from route</small></span>
           <div class="input-with-prefix">
             <span class="prefix" id="tollPrefix">$</span>
             <input type="number" id="tollsInput" class="input num" inputmode="decimal" min="0" step="any" placeholder="0.00">
           </div>
         </label>
       </div>
+      <p class="auto-note" id="tollsAutoNote" hidden></p>
     </div>
 
     <!-- Compare vehicle -->

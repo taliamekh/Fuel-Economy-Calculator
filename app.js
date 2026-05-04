@@ -196,6 +196,7 @@ const state = {
   price: 0,
   priceTouched: false,
   chartRange: '6m',
+  tollsTouched: false,
 
   cityMixPct: 45,
   drivingStyle: 'normal',
@@ -558,7 +559,9 @@ function saveState() {
       fuelType: state.fuelType, priceTouched: state.priceTouched, price: state.price,
       cityMixPct: state.cityMixPct, drivingStyle: state.drivingStyle,
       conditions: state.conditions,
-      passengers: state.passengers, tankSize: state.tankSize, tolls: state.tolls,
+      passengers: state.passengers, tankSize: state.tankSize,
+      tolls: state.tolls, tollsTouched: state.tollsTouched,
+      chartRange: state.chartRange,
       isRoundTrip: state.isRoundTrip, theme: state.theme,
     };
     localStorage.setItem(LS_KEY, JSON.stringify(slim));
@@ -1753,7 +1756,14 @@ function attachListeners() {
   });
   $('tollsInput').addEventListener('input', (e) => {
     state.tolls = parseFloat(e.target.value) || 0;
+    // Empty field re-enables auto-fill so the next route plot can populate it.
+    state.tollsTouched = e.target.value !== '';
     update();
+    // If the user just cleared the field and there's an active route with an
+    // estimate cached, re-apply it immediately rather than waiting for the next plot.
+    if (!state.tollsTouched && map.routes?.[map.activeRoute]) {
+      applyTollFerryEstimate(map.activeRoute);
+    }
   });
 
   // Compare
@@ -2124,7 +2134,8 @@ async function handleDistanceLookup() {
       .map(p => `${p.lon},${p.lat}`).join(';');
     // alternatives only available for 2-point routes; with stops, skip
     const altParam = stopsResolved.length === 0 ? '&alternatives=2' : '';
-    const url = `https://router.project-osrm.org/route/v1/driving/${points}?overview=full&geometries=geojson${altParam}`;
+    // steps=true so we can detect per-segment travel mode (driving vs ferry)
+    const url = `https://router.project-osrm.org/route/v1/driving/${points}?overview=full&geometries=geojson&steps=true${altParam}`;
     const r = await fetch(url);
     if (!r.ok) throw new Error(`Route lookup failed (${r.status})`);
     const data = await r.json();
@@ -2134,7 +2145,9 @@ async function handleDistanceLookup() {
       distance: rt.distance,
       duration: rt.duration,
       coords: rt.geometry.coordinates,
+      legs: rt.legs || [],
       avgSpeedKmh: (rt.distance / rt.duration) * 3.6,
+      tollEstimate: null, // populated async after route is selected
     }));
     // Pick initial active route based on user preferences
     map.activeRoute = pickActiveRouteIdx();
@@ -2349,6 +2362,83 @@ function selectRoute(idx) {
   $('mapInfo').textContent = cnt > 0
     ? `${cnt} fuel stations · ${fmtNumber(km, 1)} km active route`
     : `${fmtNumber(km, 1)} km active route`;
+
+  // Kick off (or refresh from cache) the toll/ferry estimate for this route.
+  applyTollFerryEstimate(idx);
+}
+
+// Compute, cache, and apply a toll/ferry estimate for a route. If the user has
+// not manually overridden the Tolls input, pre-fills it with the estimate and
+// updates the small breakdown note.
+async function applyTollFerryEstimate(idx) {
+  const route = map.routes[idx];
+  if (!route) return;
+  // Show "estimating…" state while in flight
+  if (route.tollEstimate == null) {
+    route.tollEstimate = 'pending';
+    renderTollFerryNote(null, 'pending');
+    try {
+      const country = getCountry(state.country);
+      route.tollEstimate = await estimateTollsAndFerries(route, country);
+    } catch {
+      route.tollEstimate = { error: true, tollKm: 0, ferryKm: 0, tollCost: 0, ferryCost: 0 };
+    }
+  }
+  // If the user has switched routes during the await, only apply if still active
+  if (idx !== map.activeRoute) return;
+  const est = route.tollEstimate;
+  if (!est || est === 'pending') return;
+  if (!state.tollsTouched) {
+    const total = (est.tollCost || 0) + (est.ferryCost || 0);
+    if (total > 0.01) {
+      state.tolls = parseFloat(total.toFixed(2));
+      $('tollsInput').value = state.tolls.toFixed(2);
+      update();
+    } else if (state.tolls > 0) {
+      // Previous route had tolls/ferries, this one doesn't — clear the auto-fill
+      state.tolls = 0;
+      $('tollsInput').value = '';
+      update();
+    }
+  }
+  renderTollFerryNote(est, 'ready');
+}
+
+// Renders the small breakdown line under the Trip-extras row showing how the
+// auto-filled Tolls value was derived. Hidden when the route has no tolls
+// or ferries to report.
+function renderTollFerryNote(est, status) {
+  const note = $('tollsAutoNote');
+  if (!note) return;
+  if (status === 'pending') {
+    note.hidden = false;
+    note.innerHTML = `<span class="auto-note-icon">⏳</span><span>Estimating tolls and ferries on this route…</span>`;
+    return;
+  }
+  if (!est || (est.tollKm < 0.1 && est.ferryKm < 0.1)) {
+    note.hidden = true;
+    note.innerHTML = '';
+    return;
+  }
+  const country = getCountry(state.country);
+  const us = UNIT_SYSTEMS[state.unitSystem];
+  const sym = country.symbol;
+  // Money is shown 2dp regardless of fuel-price precision (cents, not millicents).
+  const moneyFmt = v => `${sym}${v.toFixed(2)}`;
+  const parts = [];
+  if (est.tollKm >= 0.1) {
+    const distDisplay = fmtNumber(fromKm(est.tollKm, us.distance), 1);
+    parts.push(`~${distDisplay} ${us.distLabel} tolls (≈${moneyFmt(est.tollCost)})`);
+  }
+  if (est.ferryKm >= 0.1) {
+    const distDisplay = fmtNumber(fromKm(est.ferryKm, us.distance), 1);
+    parts.push(`${est.ferryLegs} ferry crossing${est.ferryLegs === 1 ? '' : 's'} · ~${distDisplay} ${us.distLabel} (≈${moneyFmt(est.ferryCost)})`);
+  }
+  const editedHint = state.tollsTouched
+    ? '. Auto-fill paused — clear the field to re-enable.'
+    : '. Auto-filled the Tolls field above.';
+  note.hidden = false;
+  note.innerHTML = `<span class="auto-note-icon">🛣️</span><span><strong>Route includes:</strong> ${parts.join(' · ')}${editedHint}</span>`;
 }
 
 // Load gas stations once for all routes' union — kept stable across route switches.
@@ -2751,6 +2841,104 @@ async function suggestFuelStops() {
   renderStops();
   showToast(`Added ${found.length} fuel stop${found.length > 1 ? 's' : ''}`);
   await handleDistanceLookup();
+}
+
+// Rough per-km toll rates by country (in local currency). Best-effort heuristics —
+// real toll prices depend on road, vehicle class, peak hour, etc. Users can override.
+const TOLL_RATE_PER_KM = {
+  CA: 0.12, US: 0.07, GB: 0.20, AU: 0.05, NZ: 0.10, IE: 0.10,
+  FR: 0.10, IT: 0.08, ES: 0.10, NL: 0.10, BE: 0.10, PT: 0.10,
+  AT: 0.10, DE: 0.00, CH: 0.00, // DE/CH use vignettes/no general car tolls
+  PL: 0.05, JP: 0.07, KR: 0.04, IN: 0.04, BR: 0.05, MX: 0.07,
+  ZA: 0.05, AE: 0.04, SG: 0.05,
+  DEFAULT: 0.08,
+};
+// Approximate ferry pricing for a car + driver — varies wildly by route, but a
+// per-km rate plus a boarding-fee floor lands close to typical short crossings.
+const FERRY_RATE_PER_KM = {
+  CA: 1.50, US: 1.50, GB: 1.80, AU: 2.00, NZ: 2.20,
+  DEFAULT: 1.80,
+};
+const FERRY_BASE_COST = {
+  CA: 18, US: 15, GB: 22, AU: 28, NZ: 30,
+  DEFAULT: 18,
+};
+
+async function estimateTollsAndFerries(route, country) {
+  const out = { tollKm: 0, ferryKm: 0, tollCost: 0, ferryCost: 0, ferryLegs: 0 };
+  if (!route) return out;
+
+  // 1. Ferry distance from OSRM step modes — precise. Track contiguous ferry runs
+  //    as separate "legs" so we can apply the boarding fee per crossing.
+  const ferryLegMeters = [];
+  let curr = 0;
+  for (const leg of route.legs || []) {
+    for (const step of leg.steps || []) {
+      const isFerry = step.mode === 'ferry' || step.driving_side === 'ferry';
+      if (isFerry) {
+        curr += step.distance || 0;
+      } else if (curr > 0) {
+        ferryLegMeters.push(curr);
+        curr = 0;
+      }
+    }
+  }
+  if (curr > 0) ferryLegMeters.push(curr);
+  out.ferryKm = ferryLegMeters.reduce((a, b) => a + b, 0) / 1000;
+  out.ferryLegs = ferryLegMeters.length;
+
+  // 2. Toll km via Overpass — pull every highway[toll=yes] way inside the route's
+  //    bounding box, keep ones whose midpoint is within ~300m of the actual
+  //    polyline, sum their lengths.
+  try {
+    const coords = route.coords || [];
+    if (coords.length < 2) throw new Error('no coords');
+    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+    for (const [lng, lat] of coords) {
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+    }
+    const padLat = Math.max(0.005, (maxLat - minLat) * 0.02);
+    const padLng = Math.max(0.005, (maxLng - minLng) * 0.02);
+    const bbox = `${minLat - padLat},${minLng - padLng},${maxLat + padLat},${maxLng + padLng}`;
+    const query = `[out:json][timeout:20];way["highway"]["toll"="yes"](${bbox});out geom;`;
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: 'data=' + encodeURIComponent(query),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const routeLatLngs = coords.map(([lng, lat]) => [lat, lng]);
+      let tollKm = 0;
+      for (const way of data.elements || []) {
+        const geom = way.geometry || [];
+        if (geom.length < 2) continue;
+        const mid = geom[Math.floor(geom.length / 2)];
+        if (!isNearRoute(mid.lat, mid.lon, routeLatLngs, 0.3)) continue;
+        let len = 0;
+        for (let i = 1; i < geom.length; i++) {
+          len += haversineKm(geom[i-1].lat, geom[i-1].lon, geom[i].lat, geom[i].lon);
+        }
+        tollKm += len;
+      }
+      out.tollKm = tollKm;
+    }
+  } catch { /* leave tollKm at 0 if Overpass fails */ }
+
+  // 3. Cost in local currency.
+  const cc = country?.code || 'DEFAULT';
+  const tollRate = TOLL_RATE_PER_KM[cc] ?? TOLL_RATE_PER_KM.DEFAULT;
+  const ferryRate = FERRY_RATE_PER_KM[cc] ?? FERRY_RATE_PER_KM.DEFAULT;
+  const ferryBase = FERRY_BASE_COST[cc] ?? FERRY_BASE_COST.DEFAULT;
+  out.tollCost = out.tollKm * tollRate;
+  out.ferryCost = ferryLegMeters.reduce(
+    (sum, m) => sum + Math.max(ferryBase, (m / 1000) * ferryRate),
+    0
+  );
+  return out;
 }
 
 function isNearRoute(lat, lng, routeLatLngs, maxKm) {
