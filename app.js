@@ -2332,11 +2332,17 @@ function pickActiveRouteIdx() {
 }
 
 function avoidNoteSuffix() {
-  const tolls = $('avoidTolls')?.checked;
-  const ferries = $('avoidFerries')?.checked;
-  if (!tolls && !ferries) return '';
-  const which = [tolls && 'tolls', ferries && 'ferries'].filter(Boolean).join(' & ');
-  return ` Note: ${which} can't be filtered without a paid routing API.`;
+  const highways = $('avoidHighways')?.checked;
+  const tolls    = $('avoidTolls')?.checked;
+  const ferries  = $('avoidFerries')?.checked;
+  if (!highways && !tolls && !ferries) return '';
+  const which = [highways && 'highways', tolls && 'tolls', ferries && 'ferries'].filter(Boolean).join(' & ');
+  // ORS is wired up — note only matters when its key is missing locally and we
+  // had to fall back to OSRM (which can't honour avoid_features).
+  if (!window.__ORS_API_KEY) {
+    return ` Note: ${which} can't be filtered — ORS key not configured locally.`;
+  }
+  return ` Routed avoiding ${which}.`;
 }
 
 function routeFuelEstimate(routeKm) {
