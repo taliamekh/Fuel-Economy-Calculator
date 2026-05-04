@@ -202,6 +202,9 @@ const state = {
   // ISO local datetime string ("2026-05-04T17:00") for the planned departure.
   // Drives the traffic-time-of-day multiplier on displayed route durations.
   departAt: null,
+  // When true, weather conditions don't affect the fuel calculation. The
+  // weather card still displays them for reference.
+  ignoreWeather: false,
   // User-saved routes for one-tap recall. Each entry: { id, name, origin, dest, stops, savedAt }
   savedRoutes: [],
   // Current Open-Meteo reading for the active route's midpoint. Doesn't persist —
@@ -581,6 +584,7 @@ function saveState() {
       tolls: state.tolls, tollsTouched: state.tollsTouched,
       chartRange: state.chartRange,
       departAt: state.departAt,
+      ignoreWeather: state.ignoreWeather,
       savedRoutes: state.savedRoutes,
       isRoundTrip: state.isRoundTrip, theme: state.theme,
     };
@@ -963,7 +967,7 @@ function calculate() {
 
   // Primary vehicle
   const baseL = effectiveL100km(state.pickedVehicle, state.customEff, state.vehicleMode, state.cityMixPct);
-  const wMult = weatherFuelMultiplier(state.routeWeather);
+  const wMult = state.ignoreWeather ? 1.0 : weatherFuelMultiplier(state.routeWeather);
   const adjL = applyAdjustments(baseL, state.drivingStyle, state.conditions, wMult);
 
   // Price (always normalized to $/L canonical)
@@ -973,6 +977,8 @@ function calculate() {
   const totalCost = fuelLitres * priceCanonical;
   const passengers = Math.max(1, state.passengers || 1);
   const perPerson = totalCost / passengers;
+  // One-way cost — useful for round trips so users can see what each leg costs.
+  const oneWayCost = state.isRoundTrip ? totalCost / 2 : totalCost;
   const tolls = state.tolls || 0;
   const grandTotal = totalCost + tolls;
 
@@ -1001,7 +1007,8 @@ function calculate() {
   }
 
   return {
-    distanceKm, baseL, adjL, fuelLitres, totalCost, perPerson, grandTotal, tolls,
+    distanceKm, baseL, adjL, fuelLitres, totalCost, oneWayCost,
+    perPerson, grandTotal, tolls,
     fillups, passengers, country, us, priceCanonical, comparison,
   };
 }
@@ -1418,30 +1425,39 @@ function renderPriceChart() {
     return;
   }
 
-  // ----- TREND: computed from a FIXED 12-week window of the full history -----
-  // The prediction shouldn't change when the user switches view: the trend is
-  // a property of recent prices, not of the chart's zoom level. We fit a line
-  // to the last min(12, allPoints.length) data points and project 4 weeks forward.
-  // The same projection line is drawn on every range view.
-  const TREND_WINDOW = 12;
-  const trendPts = allPoints.slice(-TREND_WINDOW);
-  const tn = trendPts.length;
-  const txs = trendPts.map((_, i) => i);
-  const tys = trendPts.map(p => p.value);
-  const txMean = txs.reduce((a, b) => a + b, 0) / tn;
-  const tyMean = tys.reduce((a, b) => a + b, 0) / tn;
-  let tnum = 0, tden = 0;
-  for (let i = 0; i < tn; i++) {
-    tnum += (txs[i] - txMean) * (tys[i] - tyMean);
-    tden += (txs[i] - txMean) ** 2;
+  // ----- TREND: computed from the VISIBLE window -----
+  // The trend label on the top-right reflects what the user is currently
+  // looking at: 1W view → 1-week change, 1Y view → 1-year change. Slope
+  // (per week) drives the dashed projection line.
+  //
+  // Real gas-price forecasting needs crude-oil futures and refinery data
+  // (none in any free public feed), so the projection is explicitly a
+  // dampened extrapolation, not a forecast. We:
+  //   - dampen the slope (50%) since linear momentum overstates near-term moves
+  //   - project only 2 weeks forward (was 4) so the line doesn't wander
+  //   - cap projected change at ±10% from the latest actual value to avoid
+  //     ridiculous extrapolations from short, volatile windows
+  const xs = points.map((_, i) => i);
+  const ys = points.map(p => p.value);
+  const xMean = xs.reduce((a, b) => a + b, 0) / n;
+  const yMean = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - xMean) * (ys[i] - yMean);
+    den += (xs[i] - xMean) ** 2;
   }
-  const slope = tden === 0 ? 0 : tnum / tden; // value per week
-  const projSteps = 4;
-  // Projected points start AT the latest actual point and step forward by `slope`.
-  const lastActualValue = allPoints[allPoints.length - 1].value;
+  const rawSlope = den === 0 ? 0 : num / den; // value per chart-step
+  const slope = rawSlope * 0.5; // dampen — linear momentum exaggerates likely moves
+  const projSteps = 2;
+  const lastActualValue = points[n - 1].value;
   const projected = [];
   for (let i = 1; i <= projSteps; i++) {
-    projected.push({ x: n - 1 + i, value: lastActualValue + slope * i });
+    let v = lastActualValue + slope * i;
+    // Cap extrapolation ±10% from current to prevent wild lines on short ranges.
+    const maxDelta = lastActualValue * 0.10;
+    if (v - lastActualValue >  maxDelta) v = lastActualValue + maxDelta;
+    if (v - lastActualValue < -maxDelta) v = lastActualValue - maxDelta;
+    projected.push({ x: n - 1 + i, value: v });
   }
 
   // Plot bounds — share Y between actual and projection so they're on the same scale.
@@ -1512,15 +1528,17 @@ function renderPriceChart() {
       `<text x="${xToPx(totalSteps).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="end">+${projSteps}w</text>`;
   }
 
-  // Trend label — derived from the FIXED 12-week trend window, not the visible
-  // window, so the same prediction shows on every range view.
-  const future = projected[projSteps - 1].value;
-  const deltaPct = lastActualValue > 0 ? ((future - lastActualValue) / lastActualValue) * 100 : 0;
+  // Trend label — % change from the first to last visible point. Reflects
+  // what the user is actually looking at: 1W view shows a 1-week trend, 1Y
+  // view shows a 1-year trend. Different ranges intentionally display
+  // different numbers — that's the whole point of the range filter.
+  const firstValue = points[0].value;
+  const deltaPct = firstValue > 0 ? ((lastActualValue - firstValue) / firstValue) * 100 : 0;
   const trendDir = Math.abs(deltaPct) < 0.5 ? 'flat' : (deltaPct > 0 ? 'up' : 'down');
   const trendArrow = trendDir === 'up' ? '↗' : trendDir === 'down' ? '↘' : '→';
   const trendText = trendDir === 'flat'
-    ? 'Flat trend'
-    : `${deltaPct > 0 ? '+' : ''}${deltaPct.toFixed(1)}% in 4w (trend)`;
+    ? 'Flat'
+    : `${deltaPct > 0 ? '+' : ''}${deltaPct.toFixed(1)}% over ${range.titleLabel.replace('past ', '')}`;
 
   const truncatedNote = (range.days && allPoints.length > 0
     && allPoints[0].ts > lastTs - range.days * 86400000)
@@ -1543,7 +1561,7 @@ function renderPriceChart() {
       <circle cx="${lastActual.x.toFixed(1)}" cy="${lastActual.y.toFixed(1)}" r="3.5" class="chart-dot-last"/>
       ${xLabels}
     </svg>
-    <p class="chart-note">Trend line is a simple linear projection — useful directionally, not a forecast.</p>
+    <p class="chart-note">Dashed line is a 2-week dampened extrapolation of the visible window — directional only. Real gas-price forecasts require crude-oil futures and refinery data, which aren't in any free public feed.</p>
   `;
   bindChartRangeHandlers(host);
 }
@@ -1688,8 +1706,23 @@ function renderResults() {
   // Vehicle line — only append efficiency when picking from DB (custom label already has it).
   const vLabel = vehicleLabel(state.pickedVehicle, state.vehicleMode, state.customEff);
   let vehicleLine = vLabel;
+  const v = state.pickedVehicle;
   if (state.vehicleMode === 'pick' && r.baseL > 0) {
-    vehicleLine += ` — ${fmtNumber(fromL100km(r.baseL, us.efficiency), 1)} ${us.effLabel}`;
+    // Show the mixed effective figure plus a parenthetical breakdown of city/hwy
+    // (FuelEconomy.gov publishes them separately — surface so users see why the
+    // mix slider matters).
+    const mix = fmtNumber(fromL100km(r.baseL, us.efficiency), 1);
+    let line = ` — ${mix} ${us.effLabel}`;
+    if (v && isFinite(v.city08) && isFinite(v.highway08) && v.city08 > 0 && v.highway08 > 0) {
+      const cityMpg = v.city08;
+      const hwyMpg = v.highway08;
+      const cityL = 235.215 / cityMpg;
+      const hwyL  = 235.215 / hwyMpg;
+      const cityDisp = fmtNumber(fromL100km(cityL, us.efficiency), 1);
+      const hwyDisp  = fmtNumber(fromL100km(hwyL,  us.efficiency), 1);
+      line += ` (city ${cityDisp} · hwy ${hwyDisp})`;
+    }
+    vehicleLine += line;
   }
   const vIcon = (state.vehicleMode === 'pick' && state.pickedVehicle?.vClass)
     ? bodyClassIcon(state.pickedVehicle.vClass) : '';
@@ -1707,9 +1740,14 @@ function renderResults() {
   if (state.routeWeather && isFinite(state.routeWeather.tempC)) {
     const w = state.routeWeather;
     const [emoji, label] = describeWeatherCode(w.weatherCode);
-    const wm = weatherFuelMultiplier(w);
-    const pct = Math.round((wm - 1) * 100);
-    const pctText = pct > 0 ? ` · +${pct}% fuel` : '';
+    let pctText = '';
+    if (state.ignoreWeather) {
+      pctText = ' · impact ignored';
+    } else {
+      const wm = weatherFuelMultiplier(w);
+      const pct = Math.round((wm - 1) * 100);
+      if (pct > 0) pctText = ` · +${pct}% fuel`;
+    }
     $('resWeatherRow').hidden = false;
     flash('resWeather',
       `${emoji} ${Math.round(w.tempC)}°C, ${label}${pctText}`
@@ -1744,6 +1782,15 @@ function renderResults() {
     flash('resFillups', `~${fmtNumber(r.fillups, 1)} on a ${fmtNumber(state.tankSize, 0)} ${us.volLabel} tank`);
   } else {
     $('resFillupsRow').hidden = true;
+  }
+
+  // One-way cost — only meaningful when the round-trip checkbox is on,
+  // since one-way == total for a single-leg trip.
+  if (state.isRoundTrip && r.totalCost > 0) {
+    $('resOneWayRow').hidden = false;
+    flash('resOneWay', fmtMoney(r.oneWayCost, sym, country.currency));
+  } else {
+    $('resOneWayRow').hidden = true;
   }
 
   // Tolls + grand total
@@ -2121,6 +2168,17 @@ function attachListeners() {
   for (const cb of $$('input[type="checkbox"][data-cond]')) {
     cb.addEventListener('change', () => {
       state.conditions[cb.dataset.cond] = cb.checked;
+      update();
+    });
+  }
+  // Ignore-weather toggle: lives in the same conditions block as the manual
+  // checkboxes but flips the auto-fetched weather multiplier off entirely.
+  const ignoreWeatherChk = $('ignoreWeatherChk');
+  if (ignoreWeatherChk) {
+    ignoreWeatherChk.checked = !!state.ignoreWeather;
+    ignoreWeatherChk.addEventListener('change', () => {
+      state.ignoreWeather = ignoreWeatherChk.checked;
+      saveState();
       update();
     });
   }
@@ -3231,7 +3289,7 @@ function maybeAutoSuggestFuelStops() {
   if (!state.tankSize || state.tankSize <= 0) return;
 
   const baseL = effectiveL100km(state.pickedVehicle, state.customEff, state.vehicleMode, state.cityMixPct);
-  const wMult = weatherFuelMultiplier(state.routeWeather);
+  const wMult = state.ignoreWeather ? 1.0 : weatherFuelMultiplier(state.routeWeather);
   const adjL = applyAdjustments(baseL, state.drivingStyle, state.conditions, wMult);
   if (!adjL) return;
 

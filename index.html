@@ -298,6 +298,11 @@
             <label class="check"><input type="checkbox" data-cond="poorRoads"><span>Poor roads <em>−8%</em></span></label>
           </div>
         </div>
+
+        <div class="field">
+          <label class="check tall"><input type="checkbox" id="ignoreWeatherChk"><span><strong>Ignore live weather impact</strong> <em>resets weather multiplier to 1.0×</em></span></label>
+          <p class="hint" style="margin-top: 6px;">When on, the cost calc no longer adjusts for the route's current/forecasted temperature, precipitation, or wind. The Weather card still displays conditions for reference.</p>
+        </div>
       </div>
     </details>
 
@@ -440,6 +445,10 @@
         <div class="result-row sub" id="resFillupsRow" hidden>
           <span class="result-key">Fill-ups</span>
           <span class="result-val num" id="resFillups">—</span>
+        </div>
+        <div class="result-row" id="resOneWayRow" hidden>
+          <span class="result-key">One-way</span>
+          <span class="result-val num" id="resOneWay">—</span>
         </div>
         <div class="result-row" id="resTollsRow" hidden>
           <span class="result-key">+ Tolls</span>
