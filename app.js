@@ -548,8 +548,36 @@ function loadState() {
 function getCountry(code) {
   return COUNTRIES.find(c => c.code === code) || COUNTRIES.find(c => c.code === 'OTHER');
 }
+// Maps a US state postal code to whichever GAS_DEFAULTS key best represents it:
+// either the state itself (when EIA publishes per-state data) or its PADD region.
+const US_STATE_REGION_KEY = {
+  // States with direct EIA data
+  CA: 'US_CA', CO: 'US_CO', FL: 'US_FL', MA: 'US_MA', MN: 'US_MN',
+  NY: 'US_NY', OH: 'US_OH', TX: 'US_TX', WA: 'US_WA',
+  // PADD1A — New England
+  ME: 'US_PADD1A', NH: 'US_PADD1A', VT: 'US_PADD1A', CT: 'US_PADD1A', RI: 'US_PADD1A',
+  // PADD1B — Central Atlantic
+  NJ: 'US_PADD1B', PA: 'US_PADD1B', DE: 'US_PADD1B', MD: 'US_PADD1B', DC: 'US_PADD1B',
+  // PADD1C — Lower Atlantic
+  VA: 'US_PADD1C', NC: 'US_PADD1C', SC: 'US_PADD1C', GA: 'US_PADD1C', WV: 'US_PADD1C',
+  // PADD2 — Midwest
+  MI: 'US_PADD2', IN: 'US_PADD2', IL: 'US_PADD2', WI: 'US_PADD2', IA: 'US_PADD2',
+  MO: 'US_PADD2', ND: 'US_PADD2', SD: 'US_PADD2', NE: 'US_PADD2', KS: 'US_PADD2',
+  KY: 'US_PADD2', TN: 'US_PADD2',
+  // PADD3 — Gulf Coast
+  LA: 'US_PADD3', AR: 'US_PADD3', MS: 'US_PADD3', AL: 'US_PADD3', OK: 'US_PADD3', NM: 'US_PADD3',
+  // PADD4 — Rocky Mountain
+  MT: 'US_PADD4', ID: 'US_PADD4', WY: 'US_PADD4', UT: 'US_PADD4',
+  // PADD5 — West Coast
+  OR: 'US_PADD5', NV: 'US_PADD5', AZ: 'US_PADD5', AK: 'US_PADD5', HI: 'US_PADD5',
+};
+
 function gasDefaultFor(country, region) {
   if (country === 'CA' && region) return GAS_DEFAULTS[`CA_${region}`] || GAS_DEFAULTS.CA;
+  if (country === 'US' && region) {
+    const key = US_STATE_REGION_KEY[region];
+    if (key && GAS_DEFAULTS[key]) return GAS_DEFAULTS[key];
+  }
   return GAS_DEFAULTS[country] || GAS_DEFAULTS.OTHER;
 }
 
@@ -950,6 +978,133 @@ function renderGasPrice() {
   const def = gasDefaultFor(state.country, state.region);
   const us = UNIT_SYSTEMS[state.unitSystem];
   $('priceHint').textContent = `${def.label} (${state.fuelType}, ${getCountry(state.country).symbol}/${us.volLabel})`;
+  // Smart "Find live prices nearby" link — uses detected city + region when available
+  // so GasBuddy lands on a search relevant to the user instead of the generic home page.
+  const finder = $('gasFinderBtn');
+  if (finder) {
+    const det = state.detected || {};
+    const parts = [det.city, det.region, getCountry(state.country)?.name].filter(Boolean);
+    finder.href = parts.length
+      ? `https://www.gasbuddy.com/home?search=${encodeURIComponent(parts.join(', '))}`
+      : 'https://www.gasbuddy.com/home';
+  }
+  renderPriceChart();
+}
+
+/* =========================
+   PRICE HISTORY CHART
+   ========================= */
+// Renders an inline SVG line chart of recent regular-gas history for the active
+// region, plus a dashed linear-regression projection 4 weeks forward. Drawn from
+// scratch (no chart library) so it stays light. If the region has fewer than 3
+// history points, hides the panel — predictions on 1-2 points aren't meaningful.
+function renderPriceChart() {
+  const host = $('priceChart');
+  if (!host) return;
+  const def = gasDefaultFor(state.country, state.region);
+  const history = (def && def.history) || [];
+  const usSys = UNIT_SYSTEMS[state.unitSystem];
+  const country = getCountry(state.country);
+
+  if (history.length < 3) {
+    host.hidden = true;
+    return;
+  }
+  host.hidden = false;
+
+  // Convert prices into the user's display unit so the chart axis matches the input box.
+  const native = priceUnitFor(state.country);
+  const points = history.map(h => ({
+    date: h.date,
+    value: pricePerLToDisplay(priceDisplayToPerL(h.regular, native), usSys.volume),
+  }));
+
+  // Linear regression on (index, value) so we project 4 steps forward.
+  const n = points.length;
+  const xs = points.map((_, i) => i);
+  const ys = points.map(p => p.value);
+  const xMean = xs.reduce((a, b) => a + b, 0) / n;
+  const yMean = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - xMean) * (ys[i] - yMean);
+    den += (xs[i] - xMean) ** 2;
+  }
+  const slope = den === 0 ? 0 : num / den;
+  const intercept = yMean - slope * xMean;
+  const projSteps = 4;
+  const projected = [];
+  for (let i = 1; i <= projSteps; i++) {
+    projected.push({ x: n - 1 + i, value: slope * (n - 1 + i) + intercept });
+  }
+
+  // Plot bounds — share Y between actual and projection so they're on the same scale.
+  const allY = [...ys, ...projected.map(p => p.value)];
+  const yMin = Math.min(...allY);
+  const yMax = Math.max(...allY);
+  const yPad = Math.max(0.05, (yMax - yMin) * 0.15);
+  const yLo = yMin - yPad, yHi = yMax + yPad;
+  const totalSteps = n - 1 + projSteps;
+
+  const W = 320, H = 120, PADL = 36, PADR = 10, PADT = 12, PADB = 22;
+  const innerW = W - PADL - PADR, innerH = H - PADT - PADB;
+  const xToPx = i => PADL + (i / totalSteps) * innerW;
+  const yToPx = v => PADT + (1 - (v - yLo) / (yHi - yLo)) * innerH;
+
+  const linePath = points.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'}${xToPx(i).toFixed(1)},${yToPx(p.value).toFixed(1)}`
+  ).join(' ');
+  const lastActual = { x: xToPx(n - 1), y: yToPx(points[n - 1].value) };
+  const projPath = `M${lastActual.x.toFixed(1)},${lastActual.y.toFixed(1)} ` +
+    projected.map(p => `L${xToPx(p.x).toFixed(1)},${yToPx(p.value).toFixed(1)}`).join(' ');
+  const dots = points.map((p, i) =>
+    `<circle cx="${xToPx(i).toFixed(1)}" cy="${yToPx(p.value).toFixed(1)}" r="2.5" class="chart-dot"/>`
+  ).join('');
+
+  // Y-axis labels: top, mid, bottom
+  const yLabel = v => {
+    const dp = priceDigits(country.currency);
+    return `${country.symbol}${v.toFixed(dp + 1)}`;
+  };
+  const yTicks = [yHi, (yHi + yLo) / 2, yLo].map(v =>
+    `<text x="${PADL - 4}" y="${yToPx(v) + 3}" class="chart-y-label">${yLabel(v)}</text>`
+  ).join('');
+
+  // Date labels at first, last actual, and projected end.
+  const fmtDate = iso => {
+    const [y, m, d] = iso.split('-');
+    return `${m}/${d}`;
+  };
+  const xLabels =
+    `<text x="${xToPx(0).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="start">${fmtDate(points[0].date)}</text>` +
+    `<text x="${xToPx(n - 1).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="middle">${fmtDate(points[n - 1].date)}</text>` +
+    `<text x="${xToPx(totalSteps).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="end">+${projSteps}w</text>`;
+
+  // Trend label
+  const last = points[n - 1].value;
+  const future = projected[projSteps - 1].value;
+  const deltaPct = last > 0 ? ((future - last) / last) * 100 : 0;
+  const trendDir = Math.abs(deltaPct) < 0.5 ? 'flat' : (deltaPct > 0 ? 'up' : 'down');
+  const trendArrow = trendDir === 'up' ? '↗' : trendDir === 'down' ? '↘' : '→';
+  const trendText = trendDir === 'flat'
+    ? 'Flat trend'
+    : `${deltaPct > 0 ? '+' : ''}${deltaPct.toFixed(1)}% in 4w (trend)`;
+
+  host.innerHTML = `
+    <div class="chart-header">
+      <span class="chart-title">${escapeHtml(def.label)} · last ${n} weeks</span>
+      <span class="chart-trend chart-trend-${trendDir}">${trendArrow} ${escapeHtml(trendText)}</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="Recent gas prices">
+      ${yTicks}
+      <path d="${linePath}" class="chart-line"/>
+      <path d="${projPath}" class="chart-projection"/>
+      ${dots}
+      <circle cx="${lastActual.x.toFixed(1)}" cy="${lastActual.y.toFixed(1)}" r="3.5" class="chart-dot-last"/>
+      ${xLabels}
+    </svg>
+    <p class="chart-note">Trend line is a simple linear projection — useful directionally, not a forecast.</p>
+  `;
 }
 
 function renderConditions() {
@@ -2239,12 +2394,14 @@ function stationPopupHtml(station) {
     <strong>${escapeHtml(name)}</strong>
     ${brand && brand.toLowerCase() !== name.toLowerCase() ? `<div class="popup-sub">${escapeHtml(brand)}</div>` : ''}
     ${savedHtml}
+    <a href="${gbUrl}" target="_blank" rel="noopener noreferrer" class="popup-gb-primary" title="Open this station's GasBuddy listing in a new tab">
+      ⛽ Check GasBuddy for live price
+    </a>
     <div class="popup-sources">
-      <span class="popup-sources-label">Live prices · open in new tab</span>
+      <span class="popup-sources-label">Other sources</span>
       <div class="popup-source-row">
         <a href="${gMapsUrl}" target="_blank" rel="noopener noreferrer" title="Google Maps often shows current prices">🗺️ Google Maps</a>
         <a href="${gSearchUrl}" target="_blank" rel="noopener noreferrer" title="Search Google for today's price">🔍 Google search</a>
-        <a href="${gbUrl}" target="_blank" rel="noopener noreferrer" title="GasBuddy crowd-sourced">⛽ GasBuddy</a>
       </div>
     </div>
     <div class="popup-input">

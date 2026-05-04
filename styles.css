@@ -1864,3 +1864,48 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.015em; }
 .note strong { color: var(--text); font-weight: 600; }
 .note a { color: var(--accent); text-decoration: none; }
 .note a:hover { text-decoration: underline; }
+
+/* ============== Price history chart ============== */
+.price-chart {
+  margin-top: 14px;
+  padding: 12px;
+  background: var(--surface-2, rgba(255,255,255,0.03));
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 10px;
+}
+.price-chart .chart-header {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 10px; margin-bottom: 6px; flex-wrap: wrap;
+}
+.price-chart .chart-title {
+  font-size: 12px; font-weight: 600; color: var(--text); letter-spacing: 0.01em;
+}
+.price-chart .chart-trend {
+  font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.price-chart .chart-trend-up   { color: #ef4444; background: rgba(239, 68, 68, 0.12); }
+.price-chart .chart-trend-down { color: #22c55e; background: rgba(34, 197, 94, 0.12); }
+.price-chart .chart-trend-flat { color: var(--muted, #888); background: rgba(128, 128, 128, 0.12); }
+.price-chart .chart-svg { display: block; width: 100%; height: auto; max-height: 140px; }
+.price-chart .chart-line       { fill: none; stroke: var(--accent, #2dd4bf); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.price-chart .chart-projection { fill: none; stroke: var(--accent, #2dd4bf); stroke-width: 2; stroke-dasharray: 4 3; opacity: 0.55; stroke-linecap: round; }
+.price-chart .chart-dot        { fill: var(--accent, #2dd4bf); stroke: var(--bg, #0a0a0b); stroke-width: 1.5; }
+.price-chart .chart-dot-last   { fill: var(--accent, #2dd4bf); stroke: var(--bg, #0a0a0b); stroke-width: 2; }
+.price-chart .chart-y-label    { fill: var(--muted, #888); font-size: 9px; text-anchor: end; font-variant-numeric: tabular-nums; }
+.price-chart .chart-x-label    { fill: var(--muted, #888); font-size: 9px; font-variant-numeric: tabular-nums; }
+.price-chart .chart-note {
+  font-size: 11px; color: var(--muted, #888); margin: 6px 0 0; line-height: 1.4;
+}
+
+/* ============== Station popup — prominent GasBuddy CTA ============== */
+.station-popup .popup-gb-primary {
+  display: block; text-align: center;
+  padding: 9px 12px; margin: 8px 0 10px;
+  background: var(--accent, #2dd4bf); color: #0a0a0b !important;
+  font-weight: 600; font-size: 13px;
+  border-radius: 8px; text-decoration: none;
+  transition: filter 0.15s ease;
+}
+.station-popup .popup-gb-primary:hover { filter: brightness(1.08); text-decoration: none; }
+.station-popup .popup-gb-primary:active { transform: scale(0.98); }
