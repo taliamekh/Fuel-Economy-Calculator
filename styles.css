@@ -2196,3 +2196,55 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.015em; }
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+
+/* ============== Chart hover tooltip ============== */
+.chart-svg-wrap { position: relative; }
+.price-chart .chart-hover-line {
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.price-chart .chart-hover-dot {
+  fill: var(--accent);
+  stroke: var(--bg-elev);
+  stroke-width: 2;
+  pointer-events: none;
+}
+.price-chart .chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  display: flex; flex-direction: column; gap: 1px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  z-index: 5;
+}
+.price-chart .chart-tooltip[hidden] { display: none; }
+.price-chart .chart-tooltip strong {
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.price-chart .chart-tooltip span {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.price-chart .chart-tooltip small {
+  color: var(--text-fade);
+  font-size: 10px;
+  font-family: var(--font-sans);
+}
+.price-chart .chart-svg { cursor: crosshair; }

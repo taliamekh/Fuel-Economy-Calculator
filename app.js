@@ -1503,7 +1503,9 @@ function renderPriceChart() {
     + (lastD.getUTCMonth() - firstD.getUTCMonth());
   let xLabels = '';
   if (monthSpan >= 2) {
-    // Place a label at the first point of each month visible.
+    // Place a label at the first point of each month visible. For ranges
+    // longer than ~12 months we'd overflow the axis, so thin out to every
+    // 2nd / 3rd / 4th month and prefix the year on January labels for clarity.
     const seen = new Set();
     const labels = [];
     points.forEach((p, i) => {
@@ -1511,10 +1513,21 @@ function renderPriceChart() {
       const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
       if (seen.has(key)) return;
       seen.add(key);
-      labels.push({ idx: i, label: MONTH_NAMES_SHORT[d.getUTCMonth()] });
+      const monthName = MONTH_NAMES_SHORT[d.getUTCMonth()];
+      // Show year on January markers when the range crosses a year boundary,
+      // so "Jan '25" / "Jan '26" disambiguate the two halves.
+      const yr = String(d.getUTCFullYear()).slice(-2);
+      const label = (d.getUTCMonth() === 0) ? `${monthName} '${yr}` : monthName;
+      labels.push({ idx: i, label });
     });
-    // Drop the first label if it's right at idx=0 (avoids overlap with y-axis).
-    const filtered = labels.filter(l => l.idx > 0 || labels.length === 1);
+    // Calculate how many labels we can fit: ~50px per label minimum for legibility.
+    const maxLabels = Math.max(2, Math.floor(innerW / 50));
+    const stride = Math.max(1, Math.ceil(labels.length / maxLabels));
+    // One pass: keep stride-spaced labels and drop the idx=0 label so it
+    // doesn't collide with the y-axis (unless it's the only label we have).
+    const filtered = labels.filter((l, i) =>
+      (i % stride === 0) && (l.idx > 0 || labels.length === 1)
+    );
     xLabels = filtered.map(l =>
       `<text x="${xToPx(l.idx).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="middle">${l.label}</text>`
     ).join('');
@@ -1553,17 +1566,30 @@ function renderPriceChart() {
       <span class="chart-trend chart-trend-${trendDir}">${trendArrow} ${escapeHtml(trendText)}</span>
     </div>
     ${tabsHtml}
-    <svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="Recent gas prices">
-      ${yTicks}
-      <path d="${linePath}" class="chart-line"/>
-      <path d="${projPath}" class="chart-projection"/>
-      ${dots}
-      <circle cx="${lastActual.x.toFixed(1)}" cy="${lastActual.y.toFixed(1)}" r="3.5" class="chart-dot-last"/>
-      ${xLabels}
-    </svg>
+    <div class="chart-svg-wrap">
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="Recent gas prices" preserveAspectRatio="none">
+        ${yTicks}
+        <path d="${linePath}" class="chart-line"/>
+        <path d="${projPath}" class="chart-projection"/>
+        ${dots}
+        <circle cx="${lastActual.x.toFixed(1)}" cy="${lastActual.y.toFixed(1)}" r="3.5" class="chart-dot-last"/>
+        ${xLabels}
+        <line class="chart-hover-line" x1="0" y1="${PADT}" x2="0" y2="${PADT + innerH}" hidden/>
+        <circle class="chart-hover-dot" cx="0" cy="0" r="4" hidden/>
+      </svg>
+      <div class="chart-tooltip" hidden></div>
+    </div>
     <p class="chart-note">Dashed line is a 2-week dampened extrapolation of the visible window — directional only. Real gas-price forecasts require crude-oil futures and refinery data, which aren't in any free public feed.</p>
   `;
+  // Stash only what the hover handler actually reads. Stale fields confuse
+  // future maintainers — and the dot/line coordinate transforms are recomputed
+  // from the points themselves.
+  const svg = host.querySelector('.chart-svg');
+  if (svg) {
+    svg._chartCtx = { points, xToPx, yToPx, W, H, country, fuelLabel };
+  }
   bindChartRangeHandlers(host);
+  bindChartHoverHandlers(host);
 }
 
 function renderChartRangeTabs(activeKey) {
@@ -1582,6 +1608,101 @@ function bindChartRangeHandlers(host) {
       renderPriceChart();
     });
   }
+}
+
+// Mouse-over the chart SVG → translate the cursor's x position into the nearest
+// data point and pop a tooltip showing exact date + price. Touch-friendly: also
+// listens for touch events on mobile. Tooltip lives in HTML (not inside the SVG)
+// so it can use normal CSS positioning and won't clip at the SVG's viewBox.
+function bindChartHoverHandlers(host) {
+  const svg = host.querySelector('.chart-svg');
+  const wrap = host.querySelector('.chart-svg-wrap');
+  const tooltip = host.querySelector('.chart-tooltip');
+  const hoverLine = host.querySelector('.chart-hover-line');
+  const hoverDot  = host.querySelector('.chart-hover-dot');
+  if (!svg || !wrap || !tooltip || !hoverLine || !hoverDot) return;
+
+  // Tracks the last touch interaction so the synthesized mouse events that
+  // fire ~300ms after a tap don't re-show the tooltip we just hid.
+  let lastTouchAt = 0;
+  const onMove = clientX => {
+    const ctx = svg._chartCtx;
+    if (!ctx || !ctx.points.length) return;
+    const rect = svg.getBoundingClientRect();
+    // Convert the cursor's pixel x within the rendered SVG into the SVG's
+    // viewBox x. The SVG uses preserveAspectRatio="none" + 100% width, so the
+    // viewBox stretches/squashes to fit; we map ratio-by-ratio.
+    const xRatio = (clientX - rect.left) / rect.width;
+    const svgX = xRatio * ctx.W;
+
+    // Find the data point whose plotted x is closest to the cursor.
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < ctx.points.length; i++) {
+      const px = ctx.xToPx(i);
+      const d = Math.abs(px - svgX);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    const p = ctx.points[bestIdx];
+    const dotPxX = ctx.xToPx(bestIdx);
+    const dotPxY = ctx.yToPx(p.value);
+
+    // Move the indicator line + dot in the SVG.
+    hoverLine.setAttribute('x1', dotPxX);
+    hoverLine.setAttribute('x2', dotPxX);
+    hoverLine.hidden = false;
+    hoverDot.setAttribute('cx', dotPxX);
+    hoverDot.setAttribute('cy', dotPxY);
+    hoverDot.hidden = false;
+
+    // Position the HTML tooltip relative to .chart-svg-wrap (which is positioned).
+    const wrapRect = wrap.getBoundingClientRect();
+    const cssX = (dotPxX / ctx.W) * wrapRect.width;
+    const cssY = (dotPxY / ctx.H) * wrapRect.height;
+    const dp = priceDigits(ctx.country.currency);
+    const dateLabel = formatChartTooltipDate(p.date);
+    tooltip.innerHTML = `<strong>${escapeHtml(dateLabel)}</strong><span>${ctx.country.symbol}${p.value.toFixed(dp + 1)}</span><small>${escapeHtml(ctx.fuelLabel)}</small>`;
+    tooltip.hidden = false;
+    // Place above the dot, centered. Clamp to wrap bounds.
+    const ttWidth = tooltip.offsetWidth || 100;
+    let leftPx = cssX - ttWidth / 2;
+    leftPx = Math.max(4, Math.min(wrapRect.width - ttWidth - 4, leftPx));
+    tooltip.style.left = `${leftPx}px`;
+    tooltip.style.top  = `${Math.max(4, cssY - tooltip.offsetHeight - 12)}px`;
+  };
+  const hideHover = () => {
+    hoverLine.hidden = true;
+    hoverDot.hidden = true;
+    tooltip.hidden = true;
+  };
+
+  svg.addEventListener('mousemove', e => {
+    // Suppress mousemove events that the browser synthesizes after a tap —
+    // they'd flicker the tooltip back into view right after touchend hid it.
+    if (Date.now() - lastTouchAt < 500) return;
+    onMove(e.clientX);
+  });
+  svg.addEventListener('mouseleave', hideHover);
+  svg.addEventListener('touchstart', e => {
+    lastTouchAt = Date.now();
+    if (e.touches[0]) onMove(e.touches[0].clientX);
+  }, { passive: true });
+  svg.addEventListener('touchmove', e => {
+    lastTouchAt = Date.now();
+    if (e.touches[0]) onMove(e.touches[0].clientX);
+  }, { passive: true });
+  svg.addEventListener('touchend', () => {
+    lastTouchAt = Date.now();
+    hideHover();
+  });
+}
+
+function formatChartTooltipDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${MONTH_NAMES_SHORT[d.getUTCMonth()]} ${day}, ${d.getUTCFullYear()}`;
 }
 
 function renderConditions() {
@@ -2831,7 +2952,16 @@ async function routeViaORS(waypoints, avoidFeatures, opts = {}) {
   }
   const ordered = [...baselineFeats, ...finalFeats];
 
+  // Collect tags of preset/avoid passes that ORS rejected so the caller can
+  // tell the user "Eco unavailable — too long for this routing service."
+  // Without this, partial failures (some succeed, some hit the 6,000 km cap)
+  // disappear silently and the user sees fewer cards with no explanation.
+  const droppedPresets = annotated
+    .filter(a => a.error && a.tag)
+    .map(a => ({ tag: a.tag, label: AVOID_DISPLAY[a.tag]?.label || a.tag }));
+
   return {
+    droppedPresets,
     routes: ordered.map(feat => {
       const parsed = parseORSFeature(feat);
       if (feat.__avoidLabel) parsed.avoidLabel = feat.__avoidLabel;
@@ -2855,7 +2985,17 @@ async function orsRequest(url, body) {
     let detail = '';
     try {
       const j = JSON.parse(text);
-      detail = j?.error?.message || j?.error || '';
+      // ORS error shapes vary: sometimes {error: {code, message}}, sometimes
+      // {error: 'string'}, occasionally {error: {code: N}} with no message.
+      // Guard so we never end up stringifying an object to '[object Object]'
+      // — that would break friendlyRouteError's substring matchers.
+      if (typeof j?.error?.message === 'string') {
+        detail = j.error.message;
+      } else if (typeof j?.error === 'string') {
+        detail = j.error;
+      } else if (typeof j?.message === 'string') {
+        detail = j.message;
+      }
     } catch {}
     throw new Error(detail
       ? `ORS: ${detail}`
@@ -3002,7 +3142,15 @@ async function handleDistanceLookup() {
 
     hint.style.color = 'var(--green)';
     const noteSuffix = avoidNoteSuffix();
-    hint.textContent = `✓ ${map.routes.length} route${map.routes.length > 1 ? 's' : ''} found. Click a route to use it.${noteSuffix}`;
+    let droppedSuffix = '';
+    if (Array.isArray(data.droppedPresets) && data.droppedPresets.length) {
+      // Tell the user explicitly which preset(s) ORS couldn't return — most
+      // common cause is the route exceeded ORS's 6,000 km distance cap when
+      // combined with that preset's detour (e.g. "Eco" via back roads).
+      const names = data.droppedPresets.map(p => p.label).join(', ');
+      droppedSuffix = ` (${names} unavailable — likely too long for the routing service)`;
+    }
+    hint.textContent = `✓ ${map.routes.length} route${map.routes.length > 1 ? 's' : ''} found. Click a route to use it.${noteSuffix}${droppedSuffix}`;
 
     // selectRoute() drives station load, weather, toll-ferry, and auto-suggest.
     // It only fetches stations for the active route — no leftover stations from
@@ -3035,6 +3183,12 @@ async function handleDistanceLookup() {
 // genuinely have no road link — typically separated by water.
 function friendlyRouteError(msg) {
   const m = String(msg || '').toLowerCase();
+  // ORS free tier caps total route distance at 6,000 km. Trigger when adding
+  // many fuel stops to an already-long trip pushes total distance over that.
+  if (m.includes('approximated route distance must not be greater')
+      || m.includes('parameters exceed the server configuration limits')) {
+    return "This route is too long for our free routing service (over ~6,000 km total). Try fewer fuel stops, or a shorter trip.";
+  }
   // Match the major variants of "no route exists" across OSRM ("No drivable
   // route") and ORS ("Route could not be found", "Unable to find a route").
   if (m.includes('no drivable') || m.includes('no route') || m.includes('not found')
@@ -3296,6 +3450,12 @@ function maybeAutoSuggestFuelStops() {
   if (!map.routes.length || !map.routes[map.activeRoute]) return;
   if ((map.stops || []).length > 0) return;
   if (!state.tankSize || state.tankSize <= 0) return;
+  // Skip if we already tried suggesting stops for this exact route — even
+  // if the attempt found nothing (e.g. Overpass rate-limited or no nearby
+  // stations). Without this stamp, every selectRoute on the same route
+  // re-arms the auto-suggest timer.
+  if (map.routes[map.activeRoute].autoSuggestTried) return;
+  if (suggestStopsInFlight) return;
 
   const baseL = effectiveL100km(state.pickedVehicle, state.customEff, state.vehicleMode, state.cityMixPct);
   const wMult = state.ignoreWeather ? 1.0 : weatherFuelMultiplier(state.routeWeather);
@@ -3503,7 +3663,7 @@ async function loadStationsForActiveRoute() {
   // Convert ORS/OSRM [lon,lat] into [lat,lng] tuples for the rest of the pipeline.
   const routeLatLngs = route.coords.map(c => [c[1], c[0]]);
   try {
-    const count = await loadGasStationsAlongRoute(routeLatLngs);
+    const count = await loadGasStationsAlongRoute(routeLatLngs, myGen);
     if (myGen !== stationGen) return; // a newer load superseded this one
     map.stationCount = count;
     const km = route.distance / 1000;
@@ -3682,7 +3842,7 @@ function attachAddressAutocomplete(inputEl, dropdownEl, onSelect) {
   });
 }
 
-async function loadGasStationsAlongRoute(routeLatLngs) {
+async function loadGasStationsAlongRoute(routeLatLngs, expectedGen = stationGen) {
   // Old approach: one Overpass query against the route's full bbox, then
   // filter client-side to within 2.5km of the polyline. For a Toronto-Vancouver
   // route the bbox covers ~5 million km² — Overpass would return tens of
@@ -3730,6 +3890,10 @@ async function loadGasStationsAlongRoute(routeLatLngs) {
   });
   if (!res.ok) throw new Error('Overpass error');
   const data = await res.json();
+  // Stale-check BEFORE we touch map.stationLayer — a newer route may have
+  // already painted its stations while we were awaiting the network. Without
+  // this guard, our soon-to-be-stale removeLayer/addTo would clobber it.
+  if (expectedGen !== stationGen) return 0;
   // Dedupe — overlapping `around:` buffers will return the same node multiple times.
   const seen = new Set();
   let stations = (data.elements || []).filter(s => {
@@ -3895,86 +4059,162 @@ function toggleMapClickMode() {
   }
 }
 
+// Cap the number of fuel-stop suggestions per click. ORS's free tier rejects
+// total route distances over 6,000,000 meters, and each waypoint adds detour
+// length on top of the base trip; capping at 6 keeps even cross-continent
+// trips inside the limit, and 6 stops is plenty for any realistic refuel cadence.
+const SUGGEST_STOPS_CAP = 6;
+// In-flight guard: a rapid double-click would otherwise race two parallel
+// Overpass batches and two re-route cascades. Tracked at module scope so the
+// auto-suggest path (setTimeout-scheduled) and the manual button path share it.
+let suggestStopsInFlight = false;
+
 async function suggestFuelStops() {
+  if (suggestStopsInFlight) return;
   if (!map.routes.length || !map.routes[map.activeRoute]) {
     showToast('Calculate a route first', 'error'); return;
   }
   if (!state.tankSize || state.tankSize <= 0) {
     showToast('Set your tank size in Trip extras first', 'error'); return;
   }
-  const baseL = effectiveL100km(state.pickedVehicle, state.customEff, state.vehicleMode, state.cityMixPct);
-  const adjL = applyAdjustments(baseL, state.drivingStyle, state.conditions);
-  if (!adjL) { showToast('Pick a vehicle or enter custom efficiency first', 'error'); return; }
-
-  // Convert tank size to litres for math
-  const us = UNIT_SYSTEMS[state.unitSystem];
-  const tankL = toLitre(state.tankSize, us.volume);
-  const tankRangeKm = (tankL / adjL) * 100;
-  const interval = tankRangeKm * 0.7; // 70% safety buffer
-  const totalKm = map.routes[map.activeRoute].distance / 1000;
-  if (totalKm < interval) {
-    showToast(`Route is shorter than ${Math.round(interval)} km — no fuel stops needed`);
-    return;
+  // Snapshot origin for the post-await sort. If the user clicks Clear route
+  // mid-Overpass, map.origin gets nulled and `map.origin.lat` would crash.
+  const originSnap = map.origin && isFinite(map.origin.lat) ? { ...map.origin } : null;
+  if (!originSnap) {
+    showToast('Set a start and destination first', 'error'); return;
   }
+  suggestStopsInFlight = true;
+  const suggestBtn = $('suggestStopsBtn');
+  if (suggestBtn) suggestBtn.disabled = true;
+  // The early-return paths below need to release the in-flight guard.
+  // Wrap everything in try/finally so the guard is always cleared, even on
+  // throw, and the suggest button is re-enabled.
+  const release = () => {
+    suggestStopsInFlight = false;
+    if (suggestBtn) suggestBtn.disabled = false;
+  };
+  try {
+    const baseL = effectiveL100km(state.pickedVehicle, state.customEff, state.vehicleMode, state.cityMixPct);
+    const wMult = state.ignoreWeather ? 1.0 : weatherFuelMultiplier(state.routeWeather);
+    const adjL = applyAdjustments(baseL, state.drivingStyle, state.conditions, wMult);
+    if (!adjL) { showToast('Pick a vehicle or enter custom efficiency first', 'error'); release(); return; }
 
-  // Walk the route geometry, find target points
-  const coords = map.routes[map.activeRoute].coords; // [lon, lat][]
-  const targets = [];
-  let cumKm = 0;
-  let nextTarget = interval;
-  for (let i = 1; i < coords.length; i++) {
-    const seg = haversineKm(coords[i - 1][1], coords[i - 1][0], coords[i][1], coords[i][0]);
-    cumKm += seg;
-    while (cumKm >= nextTarget && nextTarget < totalKm - interval / 2) {
-      targets.push({ lat: coords[i][1], lon: coords[i][0] });
-      nextTarget += interval;
+    // Stamp the active route so the auto-suggest path doesn't re-arm itself
+    // on every selectRoute when the user has already dismissed/processed stops
+    // for this exact route. Cleared if the user manually clears the route.
+    const activeRoute = map.routes[map.activeRoute];
+    activeRoute.autoSuggestTried = true;
+
+    // Convert tank size to litres for math
+    const us = UNIT_SYSTEMS[state.unitSystem];
+    const tankL = toLitre(state.tankSize, us.volume);
+    const tankRangeKm = (tankL / adjL) * 100;
+    const interval = tankRangeKm * 0.7; // 70% safety buffer
+    const totalKm = activeRoute.distance / 1000;
+    if (totalKm < interval) {
+      showToast(`Route is shorter than ${Math.round(interval)} km — no fuel stops needed`);
+      release(); return;
     }
-  }
-  if (targets.length === 0) { showToast('No fuel stops needed for this distance'); return; }
 
-  showToast(`Searching for ${targets.length} fuel stop${targets.length > 1 ? 's' : ''}…`);
-
-  // Find nearest gas station to each target
-  const found = [];
-  for (const t of targets) {
-    try {
-      const query = `[out:json][timeout:25];node["amenity"="fuel"](around:6000,${t.lat},${t.lon});out body 5;`;
-      const res = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        body: 'data=' + encodeURIComponent(query),
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const stations = data.elements || [];
-      if (stations.length === 0) continue;
-      // Pick closest to target
-      let nearest = stations[0];
-      let nearestD = haversineKm(nearest.lat, nearest.lon, t.lat, t.lon);
-      for (const s of stations) {
-        const d = haversineKm(s.lat, s.lon, t.lat, t.lon);
-        if (d < nearestD) { nearest = s; nearestD = d; }
+    // Walk the route geometry, find target points where the tank would be at ~30%.
+    const coords = activeRoute.coords; // [lon, lat][]
+    const targets = [];
+    let cumKm = 0;
+    let nextTarget = interval;
+    for (let i = 1; i < coords.length; i++) {
+      const seg = haversineKm(coords[i - 1][1], coords[i - 1][0], coords[i][1], coords[i][0]);
+      cumKm += seg;
+      while (cumKm >= nextTarget && nextTarget < totalKm - interval / 2) {
+        targets.push({ lat: coords[i][1], lon: coords[i][0] });
+        nextTarget += interval;
       }
-      const name = nearest.tags?.name || nearest.tags?.brand || 'Fuel station';
-      // Skip if too close to an existing stop (avoid dupes)
-      const dup = map.stops.find(st =>
-        st.lat != null && haversineKm(st.lat, st.lon, nearest.lat, nearest.lon) < 1);
-      if (dup) continue;
-      found.push({ lat: nearest.lat, lon: nearest.lon, label: name });
-    } catch (e) { /* skip */ }
-  }
-  if (found.length === 0) { showToast('No suitable gas stations found along route', 'error'); return; }
+    }
+    if (targets.length === 0) { showToast('No fuel stops needed for this distance'); release(); return; }
 
-  // Insert in route order — sort by distance from origin along route
-  found.sort((a, b) => {
-    const dA = haversineKm(a.lat, a.lon, map.origin.lat, map.origin.lon);
-    const dB = haversineKm(b.lat, b.lon, map.origin.lat, map.origin.lon);
-    return dA - dB;
-  });
-  for (const s of found) map.stops.push(s);
-  renderStops();
-  showToast(`Added ${found.length} fuel stop${found.length > 1 ? 's' : ''}`);
-  await handleDistanceLookup();
+    // Cap suggestions: keep the first SUGGEST_STOPS_CAP targets, evenly spaced.
+    // For very long trips with many naturally-emitted targets, sample down to N.
+    let sampledTargets = targets;
+    if (targets.length > SUGGEST_STOPS_CAP) {
+      const step = (targets.length - 1) / (SUGGEST_STOPS_CAP - 1);
+      sampledTargets = [];
+      for (let i = 0; i < SUGGEST_STOPS_CAP; i++) {
+        sampledTargets.push(targets[Math.round(i * step)]);
+      }
+    }
+
+    showToast(`Searching for ${sampledTargets.length} fuel stop${sampledTargets.length > 1 ? 's' : ''}…`);
+
+    // PARALLEL Overpass calls — old code awaited each in sequence, so 6 stops took
+    // 6 × Overpass-latency. Promise.all collapses that to a single round trip.
+    // Failures are logged so devtools shows whether "no stops added" was network
+    // failure (transient, retry-worthy) vs no-stations-near-target (terminal).
+    const findOne = async t => {
+      try {
+        const query = `[out:json][timeout:25];node["amenity"="fuel"](around:6000,${t.lat.toFixed(4)},${t.lon.toFixed(4)});out body 5;`;
+        const res = await fetch('https://overpass-api.de/api/interpreter', {
+          method: 'POST',
+          body: 'data=' + encodeURIComponent(query),
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        });
+        if (!res.ok) {
+          console.warn('[suggest-fuel-stops] Overpass returned', res.status, 'for', t);
+          return null;
+        }
+        const data = await res.json();
+        const stations = data.elements || [];
+        if (stations.length === 0) return null;
+        // Pick closest to target.
+        let nearest = stations[0];
+        let nearestD = haversineKm(nearest.lat, nearest.lon, t.lat, t.lon);
+        for (const s of stations) {
+          const d = haversineKm(s.lat, s.lon, t.lat, t.lon);
+          if (d < nearestD) { nearest = s; nearestD = d; }
+        }
+        return {
+          lat: nearest.lat,
+          lon: nearest.lon,
+          label: nearest.tags?.name || nearest.tags?.brand || 'Fuel station',
+        };
+      } catch (e) {
+        console.warn('[suggest-fuel-stops] Overpass failed for target', t, e);
+        return null;
+      }
+    };
+    const results = (await Promise.all(sampledTargets.map(findOne))).filter(Boolean);
+
+    // De-duplicate against existing stops AND against each other (parallel results
+    // can yield the same nearest station for two adjacent targets).
+    const accepted = [];
+    for (const r of results) {
+      const dupExisting = map.stops.find(st => st.lat != null
+        && haversineKm(st.lat, st.lon, r.lat, r.lon) < 1);
+      const dupSelf = accepted.find(a => haversineKm(a.lat, a.lon, r.lat, r.lon) < 1);
+      if (!dupExisting && !dupSelf) accepted.push(r);
+    }
+    if (accepted.length === 0) {
+      showToast('No suitable gas stations found along route', 'error');
+      release(); return;
+    }
+
+    // Sort by distance from the snapshotted origin so they appear in route
+    // order. Using the snapshot avoids a crash if the user clicked Clear
+    // route during the Overpass await window.
+    accepted.sort((a, b) => {
+      const dA = haversineKm(a.lat, a.lon, originSnap.lat, originSnap.lon);
+      const dB = haversineKm(b.lat, b.lon, originSnap.lat, originSnap.lon);
+      return dA - dB;
+    });
+    for (const s of accepted) map.stops.push(s);
+    renderStops();
+    showToast(`Added ${accepted.length} fuel stop${accepted.length > 1 ? 's' : ''}`);
+    // Release BEFORE the recursive handleDistanceLookup so that selectRoute's
+    // maybeAutoSuggestFuelStops sees stops>0 and skips, never touches the guard.
+    release();
+    await handleDistanceLookup();
+  } catch (e) {
+    console.warn('[suggest-fuel-stops] failed', e);
+    release();
+  }
 }
 
 // Rough per-km toll rates by country (in local currency). Best-effort heuristics —
