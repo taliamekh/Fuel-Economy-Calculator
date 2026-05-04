@@ -20,24 +20,32 @@ Plan the cost of any road trip in any country. Pick your car or enter custom eff
 
 ```
 Fuel-Economy-Calculator/
-├── .github/workflows/      GitHub Actions (daily price refresh)
+├── .github/workflows/      GitHub Actions
+│   ├── pages.yml             Builds + deploys to Pages, injects ORS_API_KEY secret
+│   └── update-prices.yml     Daily price refresh
 ├── data/
 │   └── prices.json         Daily-refreshed regional averages + history
 ├── scripts/
 │   └── update-prices.mjs   Fetches EIA + NRCan, rewrites data/prices.json
 ├── app.js                  Front-end logic (single file by design)
+├── config.example.js       Local-dev placeholder for ORS_API_KEY
 ├── index.html              Page shell
 ├── styles.css              Styles (dark/light themes)
 ├── package.json            Project metadata + npm scripts
 └── README.md               This file
 ```
 
-The site is **fully static** — no build step, no backend. Open `index.html` directly or serve the folder with any static server. GitHub Pages serves from the repo root.
+The site is **fully static** — no build step, no backend. Open `index.html` directly or serve the folder with any static server.
 
 ## Running locally
 
 ```bash
-# Any static server works. Examples:
+# Copy the config placeholder; paste your own ORS key (optional — without one
+# the avoid-features checkboxes go inert but everything else still works)
+cp config.example.js config.js
+# Then edit config.js and replace the empty string with your key.
+
+# Serve the folder:
 python -m http.server 5173
 # or
 npx serve .
@@ -45,7 +53,25 @@ npx serve .
 
 Then open <http://localhost:5173>.
 
-`data/prices.json` is loaded by the front end at startup. If the fetch fails (offline, opened as `file://`, missing file), the app falls back to in-code defaults and keeps working.
+`data/prices.json` is loaded by the front end at startup. If the fetch fails
+(offline, `file://`, missing file), the app falls back to in-code defaults and
+keeps working. Same with `config.js` — if it's missing or the key is empty,
+routing falls back from OpenRouteService to OSRM (which doesn't support
+avoid-features, but the rest of the app is unaffected).
+
+## Deploying
+
+Two one-time setup steps for fresh-clone deployments:
+
+1. **Add the ORS key as a secret.** GitHub repo → Settings → Secrets and
+   variables → Actions → New repository secret. Name it `ORS_API_KEY`, paste
+   your OpenRouteService key as the value.
+2. **Switch Pages source to GitHub Actions.** GitHub repo → Settings → Pages
+   → Build and deployment → Source: **GitHub Actions**.
+
+After that, every push to `main` triggers `.github/workflows/pages.yml`, which
+generates `config.js` from the secret at build time and uploads the site to
+Pages. The real key never enters the repo.
 
 ## Daily price refresh
 

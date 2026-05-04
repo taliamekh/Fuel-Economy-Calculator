@@ -2089,6 +2089,121 @@ function clearMapLayers() {
   clearStationLayer();
 }
 
+// Read the current state of the three avoid checkboxes and return ORS feature names.
+function collectAvoidFeatures() {
+  const out = [];
+  if ($('avoidHighways')?.checked) out.push('highways');
+  if ($('avoidTolls')?.checked)    out.push('tollways');
+  if ($('avoidFerries')?.checked)  out.push('ferries');
+  return out;
+}
+
+// OSRM: free, no auth, no avoid_features support. Used for "default" routing.
+// Returns a normalized shape matching what map.routes expects.
+async function routeViaOSRM(waypoints, stopCount) {
+  const points = waypoints.map(p => `${p.lon},${p.lat}`).join(';');
+  const altParam = stopCount === 0 ? '&alternatives=2' : '';
+  const url = `https://router.project-osrm.org/route/v1/driving/${points}?overview=full&geometries=geojson&steps=true${altParam}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Route lookup failed (${r.status})`);
+  const data = await r.json();
+  if (data.code !== 'Ok' || !data.routes?.length) throw new Error('No drivable route found');
+  return data;
+}
+
+// OpenRouteService: requires API key, supports avoid_features, returns per-segment
+// toll/ferry markers via the `extras` field. We translate ORS's response shape
+// into the same { routes: [{distance, duration, geometry:{coordinates}, legs:[{steps}], extras }] }
+// shape OSRM produces, plus a flattened orsExtraDistances precomputed from extras.values
+// so the toll/ferry estimator can use them directly.
+async function routeViaORS(waypoints, avoidFeatures) {
+  // ORS announced a migration to api.heigit.org but as of 2026-05 the new
+  // subdomain rejects browser CORS preflights with 404 on OPTIONS. The original
+  // api.openrouteservice.org still works fine from browsers.
+  const url = 'https://api.openrouteservice.org/v2/directions/driving-car/geojson';
+  const body = {
+    coordinates: waypoints.map(p => [p.lon, p.lat]),
+    instructions: true,
+    extra_info: ['tollways', 'waytype'],
+    options: avoidFeatures.length ? { avoid_features: avoidFeatures } : {},
+    // alternative_routes only allowed on 2-point queries in ORS too
+    ...(waypoints.length === 2 ? { alternative_routes: { target_count: 2, weight_factor: 1.4, share_factor: 0.6 } } : {}),
+  };
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': window.__ORS_API_KEY,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const err = await r.text().catch(() => '');
+    throw new Error(`ORS lookup failed (${r.status})${err ? `: ${err.slice(0, 200)}` : ''}`);
+  }
+  const data = await r.json();
+  if (!data.features?.length) throw new Error('No drivable route found');
+  // ORS coordinates are already [lon, lat] in geometry; segments→legs with synthetic steps
+  // so existing leg/step consumers (the ferry detector) don't have to care which backend ran.
+  return {
+    routes: data.features.map(feat => {
+      const segments = feat.properties?.segments || [];
+      const legs = segments.map(seg => ({
+        steps: (seg.steps || []).map(st => ({
+          mode: 'driving',
+          distance: st.distance,
+          duration: st.duration,
+        })),
+      }));
+      // Pre-compute toll/ferry meters from the extras + waytype tables. Cheaper to do
+      // it once here than to rebuild it every time the chart or summary re-renders.
+      const orsExtraDistances = computeORSExtraDistances(feat);
+      return {
+        distance: feat.properties?.summary?.distance ?? 0,
+        duration: feat.properties?.summary?.duration ?? 0,
+        geometry: feat.geometry,
+        legs,
+        extras: feat.properties?.extras || null,
+        orsExtraDistances,
+      };
+    }),
+  };
+}
+
+// ORS returns extras like:
+//   extras.tollways.values = [[start_idx, end_idx, value], ...]
+// where start_idx / end_idx are indices into the route's coordinate array, and
+// `value` is 1 for tollway, 0 otherwise. waytype carries similar info, with
+// value === 7 meaning "ferry". We sum each contiguous segment's geographic
+// length to get exact toll-km and ferry-km for the route.
+function computeORSExtraDistances(feature) {
+  const out = { tollKm: 0, ferryKm: 0, ferryLegs: 0 };
+  const coords = feature.geometry?.coordinates || [];
+  if (coords.length < 2) return out;
+
+  const segLen = (a, b) => haversineKm(a[1], a[0], b[1], b[0]);
+  const sumRange = (start, end) => {
+    let km = 0;
+    for (let i = start; i < end && i + 1 < coords.length; i++) {
+      km += segLen(coords[i], coords[i + 1]);
+    }
+    return km;
+  };
+
+  const tollVals = feature.properties?.extras?.tollways?.values || [];
+  for (const [s, e, v] of tollVals) {
+    if (v === 1) out.tollKm += sumRange(s, e);
+  }
+  const wayVals = feature.properties?.extras?.waytype?.values || [];
+  for (const [s, e, v] of wayVals) {
+    if (v === 7) {
+      out.ferryKm += sumRange(s, e);
+      out.ferryLegs += 1;
+    }
+  }
+  return out;
+}
+
 async function handleDistanceLookup() {
   const originText = $('distOrigin').value.trim();
   const destText = $('distDest').value.trim();
@@ -2130,22 +2245,23 @@ async function handleDistanceLookup() {
     }
 
     hint.textContent = 'Computing routes…';
-    const points = [origin, ...stopsResolved, dest]
-      .map(p => `${p.lon},${p.lat}`).join(';');
-    // alternatives only available for 2-point routes; with stops, skip
-    const altParam = stopsResolved.length === 0 ? '&alternatives=2' : '';
-    // steps=true so we can detect per-segment travel mode (driving vs ferry)
-    const url = `https://router.project-osrm.org/route/v1/driving/${points}?overview=full&geometries=geojson&steps=true${altParam}`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`Route lookup failed (${r.status})`);
-    const data = await r.json();
-    if (data.code !== 'Ok' || !data.routes?.length) throw new Error('No drivable route found');
+    const waypoints = [origin, ...stopsResolved, dest];
+    // ORS handles avoid_features; OSRM doesn't. Pick the right backend per request.
+    const avoidFeatures = collectAvoidFeatures();
+    const useORS = avoidFeatures.length > 0 && !!window.__ORS_API_KEY;
+    const data = useORS
+      ? await routeViaORS(waypoints, avoidFeatures)
+      : await routeViaOSRM(waypoints, stopsResolved.length);
+    if (!data.routes?.length) throw new Error('No drivable route found');
 
     map.routes = data.routes.map(rt => ({
       distance: rt.distance,
       duration: rt.duration,
       coords: rt.geometry.coordinates,
       legs: rt.legs || [],
+      // ORS-only: per-segment toll/ferry markers used by estimateTollsAndFerries
+      orsExtras: rt.extras || null,
+      orsExtraDistances: rt.orsExtraDistances || null,
       avgSpeedKmh: (rt.distance / rt.duration) * 3.6,
       tollEstimate: null, // populated async after route is selected
     }));
@@ -2885,8 +3001,30 @@ const FERRY_BASE_COST = {
 };
 
 async function estimateTollsAndFerries(route, country) {
-  const out = { tollKm: 0, ferryKm: 0, tollCost: 0, ferryCost: 0, ferryLegs: 0 };
+  const out = { tollKm: 0, ferryKm: 0, tollCost: 0, ferryCost: 0, ferryLegs: 0, source: 'overpass' };
   if (!route) return out;
+
+  // Fast path: if ORS provided per-segment toll/ferry extras for this route,
+  // use them directly — they're computed against the actual driven polyline,
+  // not a heuristic "midpoint within 300m" check.
+  if (route.orsExtraDistances) {
+    const e = route.orsExtraDistances;
+    out.source = 'ors';
+    out.tollKm = e.tollKm;
+    out.ferryKm = e.ferryKm;
+    out.ferryLegs = e.ferryLegs;
+    const cc = country?.code || 'DEFAULT';
+    const tollRate = TOLL_RATE_PER_KM[cc] ?? TOLL_RATE_PER_KM.DEFAULT;
+    const ferryRate = FERRY_RATE_PER_KM[cc] ?? FERRY_RATE_PER_KM.DEFAULT;
+    const ferryBase = FERRY_BASE_COST[cc] ?? FERRY_BASE_COST.DEFAULT;
+    out.tollCost = out.tollKm * tollRate;
+    if (out.ferryKm > 0) {
+      // ORS doesn't easily split ferry km per crossing; assume one boarding fee
+      // per detected ferry segment, which is a small over-estimate at worst.
+      out.ferryCost = (out.ferryLegs || 1) * Math.max(ferryBase, (out.ferryKm / Math.max(1, out.ferryLegs)) * ferryRate);
+    }
+    return out;
+  }
 
   // 1. Ferry distance from OSRM step modes — precise. Track contiguous ferry runs
   //    as separate "legs" so we can apply the boarding fee per crossing.
