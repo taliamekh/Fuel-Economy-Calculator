@@ -135,17 +135,46 @@ const CONDITION_PENALTY = {
    VEHICLE PRESETS
    ========================= */
 // Stored as MPG (US). Convert to other units on the fly.
+// tankL = typical tank size in litres for that segment — used to auto-fill
+// the Trip-extras tank field when the user picks a preset.
 const VEHICLE_PRESETS = [
-  { name: 'Compact',     mpg: 35 },
-  { name: 'Sedan',       mpg: 30 },
-  { name: 'Crossover',   mpg: 28 },
-  { name: 'SUV',         mpg: 22 },
-  { name: 'Truck',       mpg: 18 },
-  { name: 'Sports car',  mpg: 20 },
-  { name: 'Hybrid',      mpg: 48 },
-  { name: 'RV',          mpg: 15 },
-  { name: 'Motorcycle',  mpg: 55 },
+  { name: 'Compact',      mpg: 35, tankL: 50  },
+  { name: 'Sedan',        mpg: 30, tankL: 60  },
+  { name: 'Crossover',    mpg: 28, tankL: 60  },
+  { name: 'SUV',          mpg: 22, tankL: 75  },
+  { name: 'Pickup truck', mpg: 18, tankL: 95  },
+  { name: 'Sports car',   mpg: 20, tankL: 60  },
+  { name: 'Hybrid',       mpg: 48, tankL: 50  },
+  { name: 'Minivan',      mpg: 24, tankL: 75  },
+  { name: 'Cargo van',    mpg: 18, tankL: 95  },
+  { name: 'Moving truck', mpg: 10, tankL: 150 },
+  { name: 'RV',           mpg: 15, tankL: 200 },
+  { name: 'Motorcycle',   mpg: 55, tankL: 18  },
 ];
+
+// Map a FuelEconomy.gov VClass label to a typical tank size in litres.
+// FuelEconomy.gov doesn't expose tank capacity, so we estimate by segment;
+// users can override the value in the Trip-extras input.
+function estimateTankLitres(vClass) {
+  if (!vClass) return 0;
+  const v = String(vClass).toLowerCase();
+  if (v.includes('motorcycle'))                      return 18;
+  if (v.includes('two seater'))                      return 55;
+  if (v.includes('minicompact') || v.includes('subcompact')) return 45;
+  if (v.includes('compact'))                         return 50;
+  if (v.includes('midsize'))                         return 60;
+  if (v.includes('large car'))                       return 70;
+  if (v.includes('station wagon'))                   return v.includes('small') ? 50 : 60;
+  if (v.includes('minivan'))                         return 75;
+  if (v.includes('small pickup'))                    return 75;
+  if (v.includes('pickup'))                          return 95;
+  if (v.includes('standard') && v.includes('sport')) return 80;
+  if (v.includes('small') && v.includes('sport'))    return 60;
+  if (v.includes('sport utility'))                   return 70;
+  if (v.includes('cargo') || v.includes(' van'))     return 95;
+  if (v.includes('special'))                         return 85;
+  return 60; // unknown segment — sensible default
+}
 
 /* =========================
    STATE
@@ -166,6 +195,7 @@ const state = {
   fuelType: 'regular',
   price: 0,
   priceTouched: false,
+  chartRange: '6m',
 
   cityMixPct: 45,
   drivingStyle: 'normal',
@@ -949,6 +979,10 @@ function renderPresets() {
     btn.addEventListener('click', () => {
       state.vehicleMode = 'custom';
       state.customEff = parseFloat(fmtNumber(display, 1));
+      // Auto-fill tank from preset's typical size.
+      if (p.tankL) {
+        state.tankSize = parseFloat(fromLitre(p.tankL, us.volume).toFixed(1));
+      }
       render(); update();
     });
     grid.appendChild(btn);
@@ -978,6 +1012,14 @@ function renderGasPrice() {
   const def = gasDefaultFor(state.country, state.region);
   const us = UNIT_SYSTEMS[state.unitSystem];
   $('priceHint').textContent = `${def.label} (${state.fuelType}, ${getCountry(state.country).symbol}/${us.volLabel})`;
+  // Auto-fill notice: shown only when the price hasn't been manually edited.
+  // Tells the user *where* the prefilled number came from and that they can override.
+  const note = $('priceAutoNote');
+  if (note) {
+    note.hidden = !!state.priceTouched;
+    const regionEl = $('priceAutoRegion');
+    if (regionEl) regionEl.textContent = def.label;
+  }
   // Smart "Find live prices nearby" link — uses detected city + region when available
   // so GasBuddy lands on a search relevant to the user instead of the generic home page.
   const finder = $('gasFinderBtn');
@@ -994,10 +1036,22 @@ function renderGasPrice() {
 /* =========================
    PRICE HISTORY CHART
    ========================= */
-// Renders an inline SVG line chart of recent regular-gas history for the active
-// region, plus a dashed linear-regression projection 4 weeks forward. Drawn from
-// scratch (no chart library) so it stays light. If the region has fewer than 3
-// history points, hides the panel — predictions on 1-2 points aren't meaningful.
+// Range filter buttons shown above the chart. Days = how far back to keep points;
+// null means everything we have. Default '6m' is the most informative view given
+// HISTORY_CAP = 26 weekly entries (~6 months).
+const CHART_RANGES = {
+  '1w':  { days: 7,    label: '1W' },
+  '1m':  { days: 31,   label: '1M' },
+  '6m':  { days: 186,  label: '6M' },
+  '1y':  { days: 365,  label: '1Y' },
+  'all': { days: null, label: 'All' },
+};
+const MONTH_NAMES_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// Renders an inline SVG line chart of regional gas-price history for the active
+// region, plus a dashed linear-regression projection 4 weeks forward. Range tabs
+// (1W / 1M / 6M / 1Y / All) filter how far back we plot. X-axis switches to month
+// labels when the visible span covers 2+ months. Drawn from scratch (no chart lib).
 function renderPriceChart() {
   const host = $('priceChart');
   if (!host) return;
@@ -1005,8 +1059,10 @@ function renderPriceChart() {
   const history = (def && def.history) || [];
   const usSys = UNIT_SYSTEMS[state.unitSystem];
   const country = getCountry(state.country);
+  const rangeKey = CHART_RANGES[state.chartRange] ? state.chartRange : '6m';
+  const range = CHART_RANGES[rangeKey];
 
-  if (history.length < 3) {
+  if (history.length < 2) {
     host.hidden = true;
     return;
   }
@@ -1014,13 +1070,33 @@ function renderPriceChart() {
 
   // Convert prices into the user's display unit so the chart axis matches the input box.
   const native = priceUnitFor(state.country);
-  const points = history.map(h => ({
+  const allPoints = history.map(h => ({
     date: h.date,
+    ts: new Date(h.date).getTime(),
     value: pricePerLToDisplay(priceDisplayToPerL(h.regular, native), usSys.volume),
-  }));
+  })).sort((a, b) => a.ts - b.ts);
+
+  // Filter by selected range, anchored on the latest data point.
+  const lastTs = allPoints[allPoints.length - 1].ts;
+  const cutoff = range.days ? lastTs - range.days * 86400000 : 0;
+  const points = allPoints.filter(p => p.ts >= cutoff);
+  const n = points.length;
+
+  const tabsHtml = renderChartRangeTabs(rangeKey);
+
+  if (n < 3) {
+    host.innerHTML = `
+      <div class="chart-header">
+        <span class="chart-title">${escapeHtml(def.label)}</span>
+      </div>
+      ${tabsHtml}
+      <p class="chart-empty">Not enough data points in this window yet — try a longer range.</p>
+    `;
+    bindChartRangeHandlers(host);
+    return;
+  }
 
   // Linear regression on (index, value) so we project 4 steps forward.
-  const n = points.length;
   const xs = points.map((_, i) => i);
   const ys = points.map(p => p.value);
   const xMean = xs.reduce((a, b) => a + b, 0) / n;
@@ -1046,7 +1122,7 @@ function renderPriceChart() {
   const yLo = yMin - yPad, yHi = yMax + yPad;
   const totalSteps = n - 1 + projSteps;
 
-  const W = 320, H = 120, PADL = 36, PADR = 10, PADT = 12, PADB = 22;
+  const W = 360, H = 130, PADL = 38, PADR = 10, PADT = 10, PADB = 24;
   const innerW = W - PADL - PADR, innerH = H - PADT - PADB;
   const xToPx = i => PADL + (i / totalSteps) * innerW;
   const yToPx = v => PADT + (1 - (v - yLo) / (yHi - yLo)) * innerH;
@@ -1057,11 +1133,15 @@ function renderPriceChart() {
   const lastActual = { x: xToPx(n - 1), y: yToPx(points[n - 1].value) };
   const projPath = `M${lastActual.x.toFixed(1)},${lastActual.y.toFixed(1)} ` +
     projected.map(p => `L${xToPx(p.x).toFixed(1)},${yToPx(p.value).toFixed(1)}`).join(' ');
-  const dots = points.map((p, i) =>
-    `<circle cx="${xToPx(i).toFixed(1)}" cy="${yToPx(p.value).toFixed(1)}" r="2.5" class="chart-dot"/>`
-  ).join('');
+  // Hide individual dots when the line is dense — they just become noise.
+  const showDots = n <= 14;
+  const dots = showDots
+    ? points.map((p, i) =>
+        `<circle cx="${xToPx(i).toFixed(1)}" cy="${yToPx(p.value).toFixed(1)}" r="2.5" class="chart-dot"/>`
+      ).join('')
+    : '';
 
-  // Y-axis labels: top, mid, bottom
+  // Y-axis labels: top, mid, bottom.
   const yLabel = v => {
     const dp = priceDigits(country.currency);
     return `${country.symbol}${v.toFixed(dp + 1)}`;
@@ -1070,15 +1150,37 @@ function renderPriceChart() {
     `<text x="${PADL - 4}" y="${yToPx(v) + 3}" class="chart-y-label">${yLabel(v)}</text>`
   ).join('');
 
-  // Date labels at first, last actual, and projected end.
-  const fmtDate = iso => {
-    const [y, m, d] = iso.split('-');
-    return `${m}/${d}`;
-  };
-  const xLabels =
-    `<text x="${xToPx(0).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="start">${fmtDate(points[0].date)}</text>` +
-    `<text x="${xToPx(n - 1).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="middle">${fmtDate(points[n - 1].date)}</text>` +
-    `<text x="${xToPx(totalSteps).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="end">+${projSteps}w</text>`;
+  // X-axis labels: month names when the visible window spans 2+ months, otherwise dates.
+  const firstD = new Date(points[0].date);
+  const lastD = new Date(points[n - 1].date);
+  const monthSpan = (lastD.getUTCFullYear() - firstD.getUTCFullYear()) * 12
+    + (lastD.getUTCMonth() - firstD.getUTCMonth());
+  let xLabels = '';
+  if (monthSpan >= 2) {
+    // Place a label at the first point of each month visible.
+    const seen = new Set();
+    const labels = [];
+    points.forEach((p, i) => {
+      const d = new Date(p.date);
+      const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      labels.push({ idx: i, label: MONTH_NAMES_SHORT[d.getUTCMonth()] });
+    });
+    // Drop the first label if it's right at idx=0 (avoids overlap with y-axis).
+    const filtered = labels.filter(l => l.idx > 0 || labels.length === 1);
+    xLabels = filtered.map(l =>
+      `<text x="${xToPx(l.idx).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="middle">${l.label}</text>`
+    ).join('');
+    // Always mark the projection endpoint.
+    xLabels += `<text x="${xToPx(totalSteps).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="end">+${projSteps}w</text>`;
+  } else {
+    const fmtDate = iso => { const [, m, d] = iso.split('-'); return `${m}/${d}`; };
+    xLabels =
+      `<text x="${xToPx(0).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="start">${fmtDate(points[0].date)}</text>` +
+      `<text x="${xToPx(n - 1).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="middle">${fmtDate(points[n - 1].date)}</text>` +
+      `<text x="${xToPx(totalSteps).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="end">+${projSteps}w</text>`;
+  }
 
   // Trend label
   const last = points[n - 1].value;
@@ -1095,6 +1197,7 @@ function renderPriceChart() {
       <span class="chart-title">${escapeHtml(def.label)} · last ${n} weeks</span>
       <span class="chart-trend chart-trend-${trendDir}">${trendArrow} ${escapeHtml(trendText)}</span>
     </div>
+    ${tabsHtml}
     <svg viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="Recent gas prices">
       ${yTicks}
       <path d="${linePath}" class="chart-line"/>
@@ -1105,6 +1208,25 @@ function renderPriceChart() {
     </svg>
     <p class="chart-note">Trend line is a simple linear projection — useful directionally, not a forecast.</p>
   `;
+  bindChartRangeHandlers(host);
+}
+
+function renderChartRangeTabs(activeKey) {
+  return `<div class="chart-range-tabs" role="tablist">
+    ${Object.entries(CHART_RANGES).map(([key, r]) =>
+      `<button type="button" class="chart-range-tab${key === activeKey ? ' active' : ''}" data-range="${key}">${r.label}</button>`
+    ).join('')}
+  </div>`;
+}
+
+function bindChartRangeHandlers(host) {
+  for (const btn of host.querySelectorAll('.chart-range-tab')) {
+    btn.addEventListener('click', () => {
+      state.chartRange = btn.dataset.range;
+      saveState();
+      renderPriceChart();
+    });
+  }
 }
 
 function renderConditions() {
@@ -1429,8 +1551,17 @@ async function onTrimChange(role, vehicleId) {
       fuelType: veh.fuelType || veh.fuelType1 || '',
       vClass: veh.VClass || veh.vClass || '',
     };
-    if (role === 'primary') state.pickedVehicle = data;
-    else state.cmpPickedVehicle = data;
+    if (role === 'primary') {
+      state.pickedVehicle = data;
+      // Auto-fill tank size from vehicle class so users don't have to look it up.
+      const litres = estimateTankLitres(data.vClass);
+      if (litres > 0) {
+        const us = UNIT_SYSTEMS[state.unitSystem];
+        state.tankSize = parseFloat(fromLitre(litres, us.volume).toFixed(1));
+      }
+    } else {
+      state.cmpPickedVehicle = data;
+    }
     update();
   } catch (e) { showVehicleError(role, 'Could not load vehicle data.'); }
 }
@@ -1500,6 +1631,10 @@ function attachListeners() {
   });
   $('suggestStopsBtn').addEventListener('click', suggestFuelStops);
   $('mapClickModeBtn').addEventListener('click', toggleMapClickMode);
+  $('clearRouteBtn').addEventListener('click', () => {
+    clearRoutePoints();
+    showToast('Route cleared. Pick A and B from the map or the address fields.');
+  });
 
   // Vehicle mode
   for (const btn of $$('.card .seg-btn[data-mode]')) {
@@ -1843,29 +1978,72 @@ function ensureMap() {
     .setView(defaultView.center, defaultView.zoom);
   applyMapTiles();
   bindStationPopupHandlers();
-  // Listen for clicks to add waypoints when clickMode is active
+  // Listen for clicks to add waypoints when clickMode is active. The handler
+  // figures out whether this click should be A, B, or a stop based on what's
+  // already set, so the user can build a whole route from the map alone.
   map.instance.on('click', (e) => {
     if (!map.clickMode) return;
-    addStopFromCoords(e.latlng.lat, e.latlng.lng);
+    addPointByClick(e.latlng.lat, e.latlng.lng);
   });
   return map.instance;
 }
 
-async function addStopFromCoords(lat, lon) {
-  // Reverse-geocode for a friendly label
-  let label = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+async function reverseGeocodeLabel(lat, lon) {
   try {
     const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`);
     if (res.ok) {
       const data = await res.json();
       const fmt = formatNominatimSuggestion(data);
-      label = fmt.value || data.display_name || label;
+      return fmt.value || data.display_name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
     }
-  } catch (e) { /* fall back to coords */ }
-  map.stops.push({ lat, lon, label });
+  } catch { /* fall back */ }
+  return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+}
+
+// Smart click-to-build-route:
+//   1st click → origin (A)
+//   2nd click → destination (B), route is plotted
+//   3rd+ clicks → fuel stops along the way
+async function addPointByClick(lat, lon) {
+  const label = await reverseGeocodeLabel(lat, lon);
+  const point = { lat, lon, label };
+
+  if (!map.origin) {
+    map.origin = point;
+    $('distOrigin').value = label;
+    showToast(`Start set: ${label}`, 'success');
+    return;
+  }
+  if (!map.dest) {
+    map.dest = point;
+    $('distDest').value = label;
+    showToast(`Destination set: ${label}`, 'success');
+    handleDistanceLookup();
+    return;
+  }
+  map.stops.push(point);
   renderStops();
-  if (map.origin && map.dest) handleDistanceLookup();
-  else showToast('Stop added — set From/To to plot the route', 'success');
+  showToast(`Stop added: ${label}`, 'success');
+  handleDistanceLookup();
+}
+
+// Wipe the route so the user can build a fresh one from map clicks.
+function clearRoutePoints() {
+  map.origin = null;
+  map.dest = null;
+  map.stops = [];
+  $('distOrigin').value = '';
+  $('distDest').value = '';
+  renderStops();
+  // Pull route polylines + start/end markers off the map.
+  if (typeof clearRouteLayers === 'function') clearRouteLayers();
+  if (map.startMarker) { map.instance.removeLayer(map.startMarker); map.startMarker = null; }
+  if (map.endMarker) { map.instance.removeLayer(map.endMarker); map.endMarker = null; }
+  for (const m of map.stopMarkers || []) map.instance.removeLayer(m);
+  map.stopMarkers = [];
+  map.routes = [];
+  renderRouteAlts();
+  $('mapInfo').textContent = 'Pan & zoom · enter addresses above to plot a route';
 }
 
 function applyMapTiles() {
@@ -2104,7 +2282,7 @@ function renderRouteAlts() {
   const wrap = $('routeAlts');
   if (!map.routes.length) { wrap.hidden = true; return; }
   wrap.hidden = false;
-  wrap.innerHTML = '<h3 class="route-alts-title">Pick a route <small style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--text-fade)"> · times are estimated, no live traffic</small></h3>';
+  wrap.innerHTML = '<h3 class="route-alts-title">Pick a route <small style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--text-fade)"> · fastest and most-efficient may differ — pick what matters for your trip</small></h3>';
   const us = UNIT_SYSTEMS[state.unitSystem];
   const labels = labelRoutes(map.routes);
   map.routes.forEach((r, i) => {
@@ -2370,11 +2548,13 @@ function stationPopupHtml(station) {
   const street = station.tags?.['addr:street'] || '';
   const city = station.tags?.['addr:city'] || '';
   const houseNum = station.tags?.['addr:housenumber'] || '';
-  const addressFull = [houseNum, street, city].filter(Boolean).join(' ').trim();
-  const queryStr = addressFull ? `${name} ${addressFull}` : name;
-  // Multiple live-price sources
-  const gMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(queryStr)}&center=${station.lat},${station.lon}`;
-  const gSearchUrl = `https://www.google.com/search?q=${encodeURIComponent(queryStr + ' gas price today')}`;
+  const stateProv = station.tags?.['addr:state'] || station.tags?.['addr:province'] || '';
+  const country = station.tags?.['addr:country'] || '';
+  // Most-specific search string GasBuddy will accept. They don't expose deep links
+  // to individual station pages, so this lands the user on a list with this station
+  // typically in position 1.
+  const addressParts = [houseNum, street, city, stateProv, country].filter(Boolean).join(' ').trim();
+  const queryStr = addressParts ? `${name} ${addressParts}` : `${name} ${station.lat.toFixed(4)},${station.lon.toFixed(4)}`;
   const gbUrl = `https://www.gasbuddy.com/home?search=${encodeURIComponent(queryStr)}`;
   // Saved local report?
   const saved = getStationPriceReport(station.id);
@@ -2394,16 +2574,9 @@ function stationPopupHtml(station) {
     <strong>${escapeHtml(name)}</strong>
     ${brand && brand.toLowerCase() !== name.toLowerCase() ? `<div class="popup-sub">${escapeHtml(brand)}</div>` : ''}
     ${savedHtml}
-    <a href="${gbUrl}" target="_blank" rel="noopener noreferrer" class="popup-gb-primary" title="Open this station's GasBuddy listing in a new tab">
+    <a href="${gbUrl}" target="_blank" rel="noopener noreferrer" class="popup-gb-primary" title="Open this station on GasBuddy in a new tab">
       ⛽ Check GasBuddy for live price
     </a>
-    <div class="popup-sources">
-      <span class="popup-sources-label">Other sources</span>
-      <div class="popup-source-row">
-        <a href="${gMapsUrl}" target="_blank" rel="noopener noreferrer" title="Google Maps often shows current prices">🗺️ Google Maps</a>
-        <a href="${gSearchUrl}" target="_blank" rel="noopener noreferrer" title="Search Google for today's price">🔍 Google search</a>
-      </div>
-    </div>
     <div class="popup-input">
       <label>${saved ? 'Update price' : 'Saw a price? Apply it'}</label>
       <div class="popup-price-row">
@@ -2488,11 +2661,14 @@ function toggleMapClickMode() {
   const btn = $('mapClickModeBtn');
   const lbl = $('mapClickModeLabel');
   btn.setAttribute('aria-pressed', map.clickMode ? 'true' : 'false');
-  lbl.textContent = map.clickMode ? 'Click anywhere on map…' : 'Click map to add stop';
+  lbl.textContent = map.clickMode ? 'Click map…' : 'Map my own route';
   if (map.instance) {
     map.instance.getContainer().style.cursor = map.clickMode ? 'crosshair' : '';
   }
-  if (map.clickMode) showToast('Click anywhere on the map to drop a fuel stop');
+  if (map.clickMode) {
+    const next = !map.origin ? 'start (A)' : !map.dest ? 'destination (B)' : 'a fuel stop';
+    showToast(`Click the map to set ${next}. Click again to add the next point.`);
+  }
 }
 
 async function suggestFuelStops() {

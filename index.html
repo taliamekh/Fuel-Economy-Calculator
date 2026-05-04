@@ -104,8 +104,11 @@
           <button type="button" class="chip-btn" id="suggestStopsBtn">
             <span class="chip-icon">⛽</span>Suggest fuel stops
           </button>
-          <button type="button" class="chip-btn" id="mapClickModeBtn" aria-pressed="false">
-            <span class="chip-icon">🖱️</span><span id="mapClickModeLabel">Click map to add stop</span>
+          <button type="button" class="chip-btn" id="mapClickModeBtn" aria-pressed="false" title="When enabled, clicking the map sets your start, then your destination, then drops fuel stops">
+            <span class="chip-icon">📍</span><span id="mapClickModeLabel">Map my own route</span>
+          </button>
+          <button type="button" class="chip-btn chip-btn-danger" id="clearRouteBtn" title="Clear the start, destination, and all stops">
+            <span class="chip-icon">✕</span>Clear route
           </button>
         </div>
         <div class="route-actions">
@@ -225,8 +228,12 @@
           <span class="chip-icon">⛽</span>Find live prices nearby
         </a>
       </div>
+      <p class="auto-note" id="priceAutoNote">
+        <span class="auto-note-icon" aria-hidden="true">✨</span>
+        <span><strong>Auto-filled</strong> with today's <span id="priceAutoRegion">regional</span> average. Edit the box above if you saw a different price at the pump.</span>
+      </p>
       <div class="price-chart" id="priceChart" hidden></div>
-      <p class="note" id="gasNote"><strong>Live prices:</strong> "Find live prices nearby" jumps to GasBuddy with your detected city pre-filled. The averages below update daily from public data (US: EIA, Canada: NRCan). Type in the box above to override with a price you've actually seen.</p>
+      <p class="note" id="gasNote"><strong>Live prices:</strong> "Find live prices nearby" jumps to GasBuddy with your detected city pre-filled. Averages refresh daily from public data (US: EIA, Canada: NRCan).</p>
     </div>
 
     <!-- Conditions accordion -->
