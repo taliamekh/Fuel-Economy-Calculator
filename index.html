@@ -116,6 +116,13 @@
           <a class="chip-btn" id="distMapsBtn" target="_blank" rel="noopener noreferrer" href="https://www.google.com/maps/dir/">
             <span class="chip-icon">📍</span>Open in Google Maps
           </a>
+          <button type="button" class="chip-btn" id="saveRouteBtn" title="Save the current origin / stops / destination for one-tap recall later">
+            <span class="chip-icon">💾</span>Save route
+          </button>
+        </div>
+        <div class="saved-routes-row" id="savedRoutesRow" hidden>
+          <span class="field-label">Saved routes</span>
+          <div class="saved-routes-list" id="savedRoutesList"></div>
         </div>
         <div class="route-options">
           <span class="route-options-label">Avoid</span>
@@ -123,6 +130,12 @@
           <label class="avoid-chip"><input type="checkbox" id="avoidTolls"><span><span class="avoid-emoji">💵</span>Tolls</span></label>
           <label class="avoid-chip"><input type="checkbox" id="avoidFerries"><span><span class="avoid-emoji">⛴️</span>Ferries</span></label>
           <label class="avoid-chip" title="Force the route to stay inside one country — useful when a fastest route would dip across a border"><input type="checkbox" id="stayInCountry"><span><span class="avoid-emoji">🛂</span>Border crossings</span></label>
+        </div>
+        <div class="depart-row">
+          <span class="route-options-label">Departing</span>
+          <input type="datetime-local" id="departAt" class="input depart-input" title="When you'll start the trip — adjusts the time estimate for typical rush-hour congestion">
+          <button type="button" class="chip-btn ghost" id="departNowBtn" title="Set to now">Now</button>
+          <span class="hint depart-hint" id="departHint">Static road network only — no live closure data</span>
         </div>
         <p class="hint" id="distLookupHint">Type 3+ characters for address suggestions. Powered by OpenStreetMap, free.</p>
       </div>

@@ -199,6 +199,11 @@ const state = {
   priceTouched: false,
   chartRange: '6m',
   tollsTouched: false,
+  // ISO local datetime string ("2026-05-04T17:00") for the planned departure.
+  // Drives the traffic-time-of-day multiplier on displayed route durations.
+  departAt: null,
+  // User-saved routes for one-tap recall. Each entry: { id, name, origin, dest, stops, savedAt }
+  savedRoutes: [],
   // Current Open-Meteo reading for the active route's midpoint. Doesn't persist —
   // re-fetched whenever a new route is computed.
   routeWeather: null,
@@ -569,6 +574,8 @@ function saveState() {
       passengers: state.passengers, tankSize: state.tankSize,
       tolls: state.tolls, tollsTouched: state.tollsTouched,
       chartRange: state.chartRange,
+      departAt: state.departAt,
+      savedRoutes: state.savedRoutes,
       isRoundTrip: state.isRoundTrip, theme: state.theme,
     };
     localStorage.setItem(LS_KEY, JSON.stringify(slim));
@@ -1784,6 +1791,9 @@ async function onTrimChange(role, vehicleId) {
         const us = UNIT_SYSTEMS[state.unitSystem];
         state.tankSize = parseFloat(fromLitre(litres, us.volume).toFixed(1));
       }
+      // Refresh the Save-this-car button state — without this, the user has
+      // no way to know the freshly-picked car is now savable.
+      renderSavedVehicles();
     } else {
       state.cmpPickedVehicle = data;
     }
@@ -1809,6 +1819,10 @@ const update = debounce(() => {
   renderResults();
   // Keep per-route fuel estimates fresh if routes are visible
   if (map.routes && map.routes.length > 0) renderRouteAlts();
+  // Save-this-car button state depends on pickedVehicle — keep it accurate
+  // when the vehicle changes through any code path (combo pick, VIN decode,
+  // saved-car load, etc.).
+  renderSavedVehicles();
   saveState();
 }, 80);
 
@@ -1883,12 +1897,9 @@ function attachListeners() {
   $('distLookupGo').addEventListener('click', handleDistanceLookup);
   $('distMapsBtn').addEventListener('click', (e) => {
     e.preventDefault();
-    const o = $('distOrigin').value.trim();
-    const d = $('distDest').value.trim();
-    let url = 'https://www.google.com/maps/dir/';
-    if (o && d) url += `${encodeURIComponent(o)}/${encodeURIComponent(d)}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    window.open(buildGoogleMapsUrl(), '_blank', 'noopener,noreferrer');
   });
+  $('saveRouteBtn').addEventListener('click', saveCurrentRoute);
 
   // Address autocomplete
   attachAddressAutocomplete($('distOrigin'), $('distOriginDropdown'), (coords) => {
@@ -1915,6 +1926,26 @@ function attachListeners() {
     $(id).addEventListener('change', () => {
       if (map.origin && map.dest) handleDistanceLookup();
     });
+  });
+
+  // Departure time picker — drives the traffic-time-of-day multiplier on
+  // displayed durations. Re-renders the alternatives panel without re-fetching
+  // (the routes don't depend on time, only the displayed minutes do).
+  $('departAt').addEventListener('change', e => {
+    state.departAt = e.target.value || null;
+    saveState();
+    if (map.routes && map.routes.length > 0) renderRouteAlts();
+  });
+  $('departNowBtn').addEventListener('click', () => {
+    const d = new Date();
+    d.setSeconds(0, 0);
+    // Convert to local <input type="datetime-local"> format (no timezone suffix)
+    const tzOff = d.getTimezoneOffset() * 60000;
+    const localISO = new Date(d.getTime() - tzOff).toISOString().slice(0, 16);
+    $('departAt').value = localISO;
+    state.departAt = localISO;
+    saveState();
+    if (map.routes && map.routes.length > 0) renderRouteAlts();
   });
 
   // Custom efficiency
@@ -2188,9 +2219,46 @@ const map = {
 // alternates differentiate by hue without using orange.
 const ROUTE_COLORS = ['#A855F7', '#22C55E', '#60A5FA'];
 const ROUTE_NAMES = ['Fastest', 'Alternative', 'Scenic'];
-// OSRM's default car profile uses conservative free-flow speeds and undershoots real-world ETAs by ~22%.
-// Empirical correction so durations match traffic-aware estimates (Google Maps).
-const DURATION_CORRECTION = 0.78;
+// Multiplier applied to raw ORS/OSRM free-flow durations so the displayed
+// drive time approximates real-world traffic conditions. When the user has
+// picked a specific departAt, factors in time-of-day rush hours; otherwise
+// uses a modest baseline so first-load times are closer to Google Maps's
+// typical-traffic estimate.
+//
+// We don't have a live traffic feed (would need a paid service like HERE,
+// TomTom, or Google), so these are static rules-of-thumb calibrated to
+// reasonable peak/off-peak ratios — directional, not authoritative.
+function trafficDurationMultiplier(departISO) {
+  if (!departISO) return 1.10; // sane "typical" default when no time is set
+  const d = new Date(departISO);
+  if (isNaN(d.getTime())) return 1.10;
+  const hour = d.getHours();
+  const day = d.getDay();
+  const isWeekend = day === 0 || day === 6;
+  if (isWeekend) {
+    if (hour >= 12 && hour <= 17) return 1.10; // weekend afternoon errands
+    return 1.00;
+  }
+  if (hour >= 7  && hour <= 9)  return 1.35; // weekday morning rush
+  if (hour >= 16 && hour <= 19) return 1.40; // weekday evening rush
+  if (hour >= 10 && hour <= 15) return 1.10; // weekday midday
+  if (hour >= 20 && hour <= 22) return 1.00; // weekday evening
+  return 0.95;                                // late night / early morning
+}
+
+// Friendly description of the active traffic adjustment for the route-alts header.
+function trafficLabel(departISO) {
+  const m = trafficDurationMultiplier(departISO);
+  const pct = Math.round((m - 1) * 100);
+  if (!departISO) return `Estimated +${pct}% over free-flow (typical traffic)`;
+  const d = new Date(departISO);
+  if (isNaN(d.getTime())) return `Estimated +${pct}% over free-flow`;
+  const dayLabel = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const sign = pct >= 0 ? '+' : '';
+  return `Departing ${dayLabel} ${hh}:${mm} · ${sign}${pct}% vs free-flow`;
+}
 let stationGen = 0; // generation counter to discard stale station-load results
 
 function ensureMap() {
@@ -2212,6 +2280,26 @@ function ensureMap() {
     addPointByClick(e.latlng.lat, e.latlng.lng);
   });
   return map.instance;
+}
+
+// Marker drag handler — fires when the user drops a draggable marker at a new
+// location. Reverse-geocodes for a label, updates the right slot in state, then
+// re-fetches the route. Falls back to bare lat,lon if Nominatim doesn't resolve.
+async function handleMarkerDrag(kind, idx, latlng) {
+  const lat = latlng.lat, lon = latlng.lng;
+  const label = await reverseGeocodeLabel(lat, lon);
+  if (kind === 'origin') {
+    map.origin = { lat, lon, label };
+    $('distOrigin').value = label;
+  } else if (kind === 'dest') {
+    map.dest = { lat, lon, label };
+    $('distDest').value = label;
+  } else if (kind === 'stop') {
+    if (idx == null || !map.stops[idx]) return;
+    map.stops[idx] = { lat, lon, label };
+    renderStops();
+  }
+  if (map.origin && map.dest) handleDistanceLookup();
 }
 
 async function reverseGeocodeLabel(lat, lon) {
@@ -2307,6 +2395,127 @@ function clearMapLayers() {
   clearStationLayer();
 }
 
+/* =========================
+   SAVED ROUTES
+   ========================= */
+const SAVED_ROUTES_CAP = 10;
+
+function renderSavedRoutes() {
+  const row = $('savedRoutesRow');
+  const list = $('savedRoutesList');
+  if (!row || !list) return;
+  const routes = Array.isArray(state.savedRoutes) ? state.savedRoutes : [];
+  if (routes.length === 0) {
+    row.hidden = true;
+    list.innerHTML = '';
+    return;
+  }
+  row.hidden = false;
+  list.innerHTML = routes.map(r => {
+    const stopCount = (r.stops || []).length;
+    const stopBadge = stopCount ? ` · ${stopCount} stop${stopCount === 1 ? '' : 's'}` : '';
+    const labelText = `${shortenLabel(r.origin?.label)} → ${shortenLabel(r.dest?.label)}${stopBadge}`;
+    return `
+      <div class="saved-route-chip">
+        <button type="button" class="saved-route-load" data-id="${escapeHtml(String(r.id))}" title="Load this route">
+          ${escapeHtml(labelText)}
+        </button>
+        <button type="button" class="saved-route-remove" data-id="${escapeHtml(String(r.id))}" title="Remove" aria-label="Remove">×</button>
+      </div>
+    `;
+  }).join('');
+  list.querySelectorAll('.saved-route-load').forEach(btn => {
+    btn.addEventListener('click', () => loadSavedRoute(btn.dataset.id));
+  });
+  list.querySelectorAll('.saved-route-remove').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      removeSavedRoute(btn.dataset.id);
+    });
+  });
+}
+
+function shortenLabel(s) {
+  if (!s) return '?';
+  // Take the first comma-segment so "111 Albert Street, Ottawa, ON, Canada"
+  // collapses to "111 Albert Street" — chips stay readable.
+  return String(s).split(',')[0].trim().slice(0, 32);
+}
+
+function saveCurrentRoute() {
+  if (!map.origin || !map.dest) {
+    showToast('Set a start and a destination first', 'error');
+    return;
+  }
+  const id = `r_${Date.now()}`;
+  const route = {
+    id,
+    origin:  { lat: map.origin.lat, lon: map.origin.lon, label: map.origin.label },
+    dest:    { lat: map.dest.lat,   lon: map.dest.lon,   label: map.dest.label },
+    stops:   (map.stops || [])
+      .filter(s => s && isFinite(s.lat) && isFinite(s.lon))
+      .map(s => ({ lat: s.lat, lon: s.lon, label: s.label })),
+    savedAt: Date.now(),
+  };
+  const list = state.savedRoutes || [];
+  state.savedRoutes = [route, ...list].slice(0, SAVED_ROUTES_CAP);
+  saveState();
+  renderSavedRoutes();
+  showToast(`Saved: ${shortenLabel(route.origin.label)} → ${shortenLabel(route.dest.label)}`);
+}
+
+function removeSavedRoute(id) {
+  state.savedRoutes = (state.savedRoutes || []).filter(r => String(r.id) !== String(id));
+  saveState();
+  renderSavedRoutes();
+}
+
+function loadSavedRoute(id) {
+  const r = (state.savedRoutes || []).find(s => String(s.id) === String(id));
+  if (!r) return;
+  map.origin = { ...r.origin };
+  map.dest   = { ...r.dest };
+  map.stops  = (r.stops || []).map(s => ({ ...s }));
+  $('distOrigin').value = r.origin?.label || '';
+  $('distDest').value   = r.dest?.label   || '';
+  renderStops();
+  // Move this route to the front (LRU).
+  state.savedRoutes = [r, ...state.savedRoutes.filter(s => String(s.id) !== String(id))];
+  saveState();
+  showToast(`Loaded: ${shortenLabel(r.origin?.label)} → ${shortenLabel(r.dest?.label)}`);
+  handleDistanceLookup();
+}
+
+// Build a Google Maps directions URL that respects every waypoint the user
+// has set: origin → each stop in order → destination. Falls back to plain
+// text inputs if coords haven't been resolved yet, so the link is always
+// useful — even before "Calculate routes" is clicked.
+function buildGoogleMapsUrl() {
+  const parts = [];
+  const segment = (point, fallbackText) => {
+    if (point && isFinite(point.lat) && isFinite(point.lon)) {
+      return `${point.lat},${point.lon}`;
+    }
+    return fallbackText ? encodeURIComponent(fallbackText) : '';
+  };
+
+  const origin = segment(map.origin, $('distOrigin').value.trim());
+  if (origin) parts.push(origin);
+
+  for (const stop of map.stops || []) {
+    if (!stop) continue;
+    const seg = segment(stop, stop.label);
+    if (seg) parts.push(seg);
+  }
+
+  const dest = segment(map.dest, $('distDest').value.trim());
+  if (dest) parts.push(dest);
+
+  return parts.length
+    ? `https://www.google.com/maps/dir/${parts.join('/')}`
+    : 'https://www.google.com/maps/dir/';
+}
+
 // Read the current state of the avoid checkboxes. Returns the ORS feature names
 // for avoid_features plus a stayInCountry flag (mapped to ORS avoid_borders).
 function collectAvoidFeatures() {
@@ -2347,57 +2556,89 @@ async function routeViaOSRM(waypoints, stopCount) {
 //
 // ORS's deprecated api.heigit.org subdomain rejects browser CORS preflights as
 // of 2026-05; we stick with api.openrouteservice.org until that's resolved.
+// Pretty labels and colors for the additive avoid passes. Distinct from the
+// gas-station yellow and the route purple/teal/blue palette so the extra cards
+// don't blend with the baseline.
+const AVOID_DISPLAY = {
+  highways:      { label: 'No highways',         color: '#F472B6' },
+  tollways:      { label: 'No tolls',            color: '#FB7185' },
+  ferries:       { label: 'No ferries',          color: '#22D3EE' },
+  stayInCountry: { label: 'No border crossings', color: '#E11D48' },
+};
+
 async function routeViaORS(waypoints, avoidFeatures, opts = {}) {
   const url = 'https://api.openrouteservice.org/v2/directions/driving-car/geojson';
-  const orsOptions = {};
-  if (avoidFeatures.length) orsOptions.avoid_features = avoidFeatures;
-  if (opts.stayInCountry)   orsOptions.avoid_borders = 'controlled';
 
-  const baseBody = {
-    coordinates: waypoints.map(p => [p.lon, p.lat]),
-    instructions: true,
-    extra_info: ['tollways', 'waytype'],
-    options: orsOptions,
+  const makeBody = (avoid, stayCtl, pref) => {
+    const orsOpts = {};
+    if (avoid && avoid.length) orsOpts.avoid_features = avoid;
+    if (stayCtl)               orsOpts.avoid_borders = 'controlled';
+    return {
+      coordinates: waypoints.map(p => [p.lon, p.lat]),
+      instructions: true,
+      extra_info: ['tollways', 'waytype'],
+      options: orsOpts,
+      preference: pref,
+    };
   };
 
-  // Three preferences in parallel: fastest (least time), shortest (least
-  // distance, used as our "most fuel efficient" proxy), and recommended (ORS's
-  // balanced default). Each may individually error (e.g. avoid_borders rules
-  // out one strategy), so we settle and keep whatever did succeed.
-  // Note we don't fetch real-time traffic / road closures — those need a paid
-  // routing service (HERE, TomTom, Google Maps). The 3 variants here come from
-  // ORS's static cost model on top of OpenStreetMap data.
-  const [fastResult, shortResult, recResult] = await Promise.allSettled([
-    orsRequest(url, { ...baseBody, preference: 'fastest' }),
-    orsRequest(url, { ...baseBody, preference: 'shortest' }),
-    orsRequest(url, { ...baseBody, preference: 'recommended' }),
-  ]);
-
-  const pick = res => res.status === 'fulfilled' ? res.value.features?.[0] : null;
-  const fastFeat = pick(fastResult);
-  const shortFeat = pick(shortResult);
-  const recFeat = pick(recResult);
-
-  if (!fastFeat && !shortFeat && !recFeat) {
-    const err = [fastResult, shortResult, recResult]
-      .find(r => r.status === 'rejected')?.reason;
-    throw err || new Error('No drivable route found');
+  // Always run the 3 base preferences (no avoid) so the user sees the
+  // baseline Fastest / Most-efficient / Balanced cards no matter which avoid
+  // boxes they tick. Then, for each enabled avoid, run ONE additional fastest
+  // call with that avoid applied — those become extra route cards displayed
+  // alongside the baseline rather than replacing it.
+  const calls = [
+    { tag: null,            body: makeBody([], false, 'fastest') },
+    { tag: null,            body: makeBody([], false, 'shortest') },
+    { tag: null,            body: makeBody([], false, 'recommended') },
+  ];
+  for (const f of avoidFeatures) {
+    calls.push({ tag: f, body: makeBody([f], false, 'fastest') });
+  }
+  if (opts.stayInCountry) {
+    calls.push({ tag: 'stayInCountry', body: makeBody([], true, 'fastest') });
   }
 
-  // Dedupe: keep fastest first, drop subsequent routes that overlap it within
-  // 0.5% distance. That collapses cases where a region has only one realistic
-  // path and all three preferences converge.
-  const features = [];
-  const tryAdd = feat => {
-    if (!feat) return;
-    if (features.some(f => sameORSRoute(f, feat))) return;
-    features.push(feat);
-  };
-  tryAdd(fastFeat);
-  tryAdd(shortFeat);
-  tryAdd(recFeat);
+  const results = await Promise.allSettled(calls.map(c => orsRequest(url, c.body)));
+  const annotated = results.map((res, i) => ({
+    feat: res.status === 'fulfilled' ? res.value.features?.[0] : null,
+    error: res.status === 'rejected' ? res.reason : null,
+    tag: calls[i].tag,
+  }));
 
-  return { routes: features.map(parseORSFeature) };
+  if (annotated.every(a => !a.feat)) {
+    throw annotated.find(a => a.error)?.error || new Error('No drivable route found');
+  }
+
+  // Build the final list. Dedupe baseline-vs-baseline (so the same route
+  // doesn't show three times if all preferences converge), but keep avoid
+  // routes verbatim — even if their geometry is identical to a baseline,
+  // they represent a different *intent* the user explicitly asked for.
+  const baselineFeats = [];
+  const finalFeats = [];
+  for (const a of annotated) {
+    if (!a.feat) continue;
+    if (a.tag) {
+      const display = AVOID_DISPLAY[a.tag];
+      a.feat.__avoidLabel = display?.label || a.tag;
+      a.feat.__avoidColor = display?.color;
+      finalFeats.push(a.feat);
+    } else {
+      if (!baselineFeats.some(f => sameORSRoute(f, a.feat))) {
+        baselineFeats.push(a.feat);
+      }
+    }
+  }
+  const ordered = [...baselineFeats, ...finalFeats];
+
+  return {
+    routes: ordered.map(feat => {
+      const parsed = parseORSFeature(feat);
+      if (feat.__avoidLabel) parsed.avoidLabel = feat.__avoidLabel;
+      if (feat.__avoidColor) parsed.avoidColor = feat.__avoidColor;
+      return parsed;
+    }),
+  };
 }
 
 async function orsRequest(url, body) {
@@ -2449,6 +2690,8 @@ function parseORSFeature(feat) {
     legs,
     extras: feat.properties?.extras || null,
     orsExtraDistances: computeORSExtraDistances(feat),
+    avoidLabel: feat.__avoidLabel || null,
+    avoidColor: feat.__avoidColor || null,
   };
 }
 
@@ -2549,6 +2792,10 @@ async function handleDistanceLookup() {
       orsExtraDistances: rt.orsExtraDistances || null,
       avgSpeedKmh: (rt.distance / rt.duration) * 3.6,
       tollEstimate: null, // populated async after route is selected
+      // Tagged when this route comes from an additive avoid pass — labelRoutes
+      // uses these to render "No highways" / "No tolls" / etc. as their own cards.
+      avoidLabel: rt.avoidLabel || null,
+      avoidColor: rt.avoidColor || null,
     }));
     // Pick initial active route based on user preferences
     map.activeRoute = pickActiveRouteIdx();
@@ -2615,27 +2862,31 @@ async function geocodeOne(q) {
 
 function labelRoutes(routes) {
   if (routes.length === 0) return [];
-  const fastestIdx = routes.reduce((a, r, i) => r.duration < routes[a].duration ? i : a, 0);
-  const shortestIdx = routes.reduce((a, r, i) => r.distance < routes[a].distance ? i : a, 0);
-  const slowestIdx = routes.reduce((a, r, i) => r.avgSpeedKmh < routes[a].avgSpeedKmh ? i : a, 0);
-  const avoidHwy = $('avoidHighways')?.checked;
+  // For fastest / shortest, only consider untagged baseline routes — avoid-pass
+  // routes already have explicit labels and shouldn't compete for "Fastest"
+  // among the baseline trio.
+  const baselineIdxs = routes
+    .map((r, i) => (r.avoidLabel ? -1 : i))
+    .filter(i => i >= 0);
+  const minBy = (idxs, getter) =>
+    idxs.length === 0 ? -1 : idxs.reduce((a, i) => getter(routes[i]) < getter(routes[a]) ? i : a, idxs[0]);
+  const fastestIdx  = minBy(baselineIdxs, r => r.duration);
+  const shortestIdx = minBy(baselineIdxs, r => r.distance);
 
-  return routes.map((r, i) => {
-    const isFast = i === fastestIdx;
-    const isShort = i === shortestIdx;
-    const isSlowest = i === slowestIdx;
-
-    // Highlight the "less highway" alt when user wants to avoid highways
-    if (avoidHwy && routes.length > 1 && isSlowest && !isFast) {
-      return { label: 'Less highway', color: '#F472B6', key: 'lowhwy' };
+  return routes.map((rt, i) => {
+    // Tagged avoid passes always use their preset label/color.
+    if (rt.avoidLabel) {
+      return { label: rt.avoidLabel, color: rt.avoidColor || '#F472B6', key: 'avoid' };
     }
-    if (isFast && isShort && routes.length > 1) {
+    const isFast  = i === fastestIdx;
+    const isShort = i === shortestIdx;
+    if (isFast && isShort && baselineIdxs.length > 1) {
       return { label: 'Fastest & most efficient', color: '#A855F7', key: 'both' };
     }
-    if (isFast)  return { label: 'Fastest',           color: '#A855F7', key: 'fast' };
+    if (isFast)  return { label: 'Fastest',             color: '#A855F7', key: 'fast' };
     if (isShort) return { label: 'Most fuel efficient', color: '#14B8A6', key: 'efficient' };
-    // ORS's "recommended" preference call lands here when it's neither the
-    // shortest nor the fastest — a balanced pick avoiding the most stressful roads.
+    // ORS's "recommended" preference call lands here — neither shortest nor
+    // fastest, just a balanced default avoiding the most stressful roads.
     return { label: 'Balanced', color: '#60A5FA', key: 'balanced' };
   });
 }
@@ -2695,30 +2946,29 @@ function plotRoutes() {
   clearRouteLayers(); // keep station layer intact — it doesn't depend on which route is active
   if (!map.origin || !map.dest) return;
 
-  // Origin / destination markers
+  // Origin / destination markers — draggable so users can fine-tune the route
+  // by dropping the marker at a new spot. On dragend we reverse-geocode the new
+  // coords for a friendly label and re-fetch the route.
   const startIcon = L.divIcon({ className: 'map-pin map-pin-start', html: 'A', iconSize: [28, 28] });
   const endIcon = L.divIcon({ className: 'map-pin map-pin-end', html: 'B', iconSize: [28, 28] });
-  map.startMarker = L.marker([map.origin.lat, map.origin.lon], { icon: startIcon })
-    .bindPopup(`<strong>Start</strong><br>${escapeHtml(map.origin.label)}`).addTo(m);
-  map.endMarker = L.marker([map.dest.lat, map.dest.lon], { icon: endIcon })
-    .bindPopup(`<strong>End</strong><br>${escapeHtml(map.dest.label)}`).addTo(m);
+  map.startMarker = L.marker([map.origin.lat, map.origin.lon], { icon: startIcon, draggable: true })
+    .bindPopup(`<strong>Start</strong><br>${escapeHtml(map.origin.label)} <em>(drag to move)</em>`).addTo(m);
+  map.endMarker = L.marker([map.dest.lat, map.dest.lon], { icon: endIcon, draggable: true })
+    .bindPopup(`<strong>End</strong><br>${escapeHtml(map.dest.label)} <em>(drag to move)</em>`).addTo(m);
+  map.startMarker.on('dragend', e => handleMarkerDrag('origin', null, e.target.getLatLng()));
+  map.endMarker.on('dragend',   e => handleMarkerDrag('dest', null, e.target.getLatLng()));
 
   // Stop waypoint markers — color interpolates between start (A) and end (B)
   // so a chain of stops reads as "ramp from A's color to B's color."
   map.stops.forEach((s, i) => {
     if (s.lat == null || s.lon == null) return;
     const color = waypointGradientColor(i + 1, map.stops.length + 1);
-    const icon = L.divIcon({
-      className: 'map-pin map-pin-stop',
-      html: `<span style="color:${color}">${i + 1}</span>`,
-      iconSize: [26, 26],
-    });
-    icon.options.html = `<span>${i + 1}</span>`;
     // Inline color via a wrapper element so currentColor in the CSS picks it up
     const iconHtml = `<div style="color:${color};display:grid;place-items:center;width:100%;height:100%;font-weight:700;font-family:var(--font-mono);font-size:11px;box-shadow:0 2px 8px ${color}55;border-radius:50%;background:var(--bg-elev);border:2px solid ${color};">${i + 1}</div>`;
     const stopIcon = L.divIcon({ className: 'map-pin-stop-wrap', html: iconHtml, iconSize: [26, 26], iconAnchor: [13, 13] });
-    const m2 = L.marker([s.lat, s.lon], { icon: stopIcon })
-      .bindPopup(`<strong>Stop ${i + 1}</strong><br>${escapeHtml(s.label || '')}`).addTo(m);
+    const m2 = L.marker([s.lat, s.lon], { icon: stopIcon, draggable: true })
+      .bindPopup(`<strong>Stop ${i + 1}</strong><br>${escapeHtml(s.label || '')} <em>(drag to move)</em>`).addTo(m);
+    m2.on('dragend', e => handleMarkerDrag('stop', i, e.target.getLatLng()));
     map.stopMarkers.push(m2);
   });
 
@@ -2752,13 +3002,16 @@ function renderRouteAlts() {
   const wrap = $('routeAlts');
   if (!map.routes.length) { wrap.hidden = true; return; }
   wrap.hidden = false;
-  wrap.innerHTML = '<h3 class="route-alts-title">Pick a route <small style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--text-fade)" title="Live traffic and real-time road-closure data require a paid routing service (HERE / TomTom / Google). The variants below come from the static OSM road network."> · fastest, balanced, and most-efficient — based on the static road network (no live closures)</small></h3>';
+  const trafLabel = trafficLabel(state.departAt);
+  wrap.innerHTML = `<h3 class="route-alts-title">Pick a route <small style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--text-fade)" title="Live traffic and real-time road-closure data require a paid routing service. Times below are free-flow durations adjusted by a static rush-hour heuristic based on your selected departure."> · ${escapeHtml(trafLabel)}</small></h3>`;
   const us = UNIT_SYSTEMS[state.unitSystem];
   const labels = labelRoutes(map.routes);
+  const trafficMult = trafficDurationMultiplier(state.departAt);
   map.routes.forEach((r, i) => {
     const km = r.distance / 1000;
-    // Apply correction factor to OSRM's free-flow duration so it matches real-world (Google) ETAs
-    const correctedSec = r.duration * DURATION_CORRECTION;
+    // Adjust free-flow duration with a traffic-time-of-day multiplier so the
+    // displayed minutes are closer to what Google Maps shows for typical traffic.
+    const correctedSec = r.duration * trafficMult;
     const mins = Math.round(correctedSec / 60);
     const hrs = Math.floor(mins / 60);
     const remMin = mins % 60;
@@ -3115,12 +3368,15 @@ async function loadGasStationsAlongRoute(routeLatLngs) {
   map.stationLayer = L.layerGroup().addTo(map.instance);
 
   for (const s of stations) {
+    // Gas-station fill is a punchy yellow against the dark map and pops against
+    // both the green start marker and purple end marker. White outline gives
+    // contrast on the lighter voyager basemap too.
     const marker = L.circleMarker([s.lat, s.lon], {
-      radius: 6,
-      color: '#22C55E',
-      fillColor: '#22C55E',
-      weight: 2,
-      fillOpacity: 0.85,
+      radius: 7,
+      color: '#FBBF24',
+      fillColor: '#FBBF24',
+      weight: 2.5,
+      fillOpacity: 1,
     }).bindPopup(() => stationPopupHtml(s));
     marker.addTo(map.stationLayer);
   }
@@ -3568,6 +3824,9 @@ async function init() {
 
   initCombos();      // build searchable dropdown instances
   attachListeners(); // wire up everything
+  // Restore saved departure time into the picker (state already loaded)
+  if (state.departAt) $('departAt').value = state.departAt;
+  renderSavedRoutes();
   render();          // first paint with combo refs available
 
   initPickers('primary').catch(() => {});

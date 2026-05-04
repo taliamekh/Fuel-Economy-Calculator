@@ -1557,9 +1557,9 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.015em; }
 .legend-dot.legend-station {
   width: 9px; height: 9px;
   border-radius: 50%;
-  background: var(--green);
+  background: #FBBF24;
   border: 2px solid var(--bg);
-  box-shadow: 0 0 0 1px var(--green);
+  box-shadow: 0 0 0 1px #FBBF24;
 }
 
 /* Custom map pins */
@@ -2015,3 +2015,67 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.015em; }
   transition: color 0.12s ease, background 0.12s ease;
 }
 .saved-car-remove:hover { color: var(--red); background: var(--red-soft); }
+
+/* ============== Unit-card row spacing ============== */
+/* The Country/Province dropdowns and the unit toggle were touching;
+   give the toggle some breathing room. */
+.unit-card .row + .seg { margin-top: 14px; }
+
+/* ============== Departure time row ============== */
+.depart-row {
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.depart-row .depart-input {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 8px 10px;
+  max-width: 220px;
+  color-scheme: dark light;
+}
+.depart-hint {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  color: var(--text-fade);
+}
+.chip-btn.ghost {
+  background: transparent;
+  font-weight: 500;
+}
+
+/* ============== Saved routes ============== */
+.saved-routes-row {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 12px;
+}
+.saved-routes-row[hidden] { display: none; }
+.saved-routes-list {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.saved-route-chip {
+  display: inline-flex; align-items: stretch;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-elev-2);
+  overflow: hidden;
+  transition: border-color 0.12s ease;
+}
+.saved-route-chip:hover { border-color: var(--accent); }
+.saved-route-load {
+  appearance: none; -webkit-appearance: none;
+  background: transparent; border: none; color: var(--text);
+  padding: 6px 10px;
+  font-size: 12px; font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+}
+.saved-route-remove {
+  appearance: none; -webkit-appearance: none;
+  background: transparent; border: none;
+  border-left: 1px solid var(--border);
+  color: var(--text-fade); cursor: pointer;
+  width: 26px; padding: 0;
+  font-size: 14px; line-height: 1;
+}
+.saved-route-remove:hover { color: var(--red); background: var(--red-soft); }
