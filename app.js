@@ -254,7 +254,7 @@ function bodyClassIcon(vClassRaw) {
    ========================= */
 function createCombo(rootEl, config = {}) {
   if (!rootEl) return null;
-  const placeholder = config.placeholder || '— select —';
+  let placeholder = config.placeholder || '— select —';
   const searchPlaceholder = config.searchPlaceholder || 'Search…';
 
   rootEl.innerHTML = `
@@ -434,6 +434,12 @@ function createCombo(rootEl, config = {}) {
       options = []; value = null; label = ''; icon = '';
       setEmpty();
       if (isOpen) renderList();
+    },
+    // Update the trigger's empty-state text. Used by initPickers so the chained
+    // dropdowns stop saying "Pick year first" once the user picks a year, etc.
+    setPlaceholder(p) {
+      placeholder = p || '— select —';
+      if (value == null) setEmpty();
     },
     open, close,
   };
@@ -789,29 +795,54 @@ function applyAdjustments(baseL100km, style, conditions, weatherMult) {
   return baseL100km * styleMult * (1 + extra) * wMult;
 }
 
-// Compute a fuel-consumption multiplier from current weather conditions along
-// the route. Heuristics (rough): cold weather thickens fluids and forces the
-// engine to warm up, snow/rain increase rolling resistance, wind = potential
-// headwind. Numbers calibrated to industry-published ranges (DOE/AAA).
+// Compute a fuel-consumption multiplier from current weather along the route.
+// Calibrated to DOE/AAA published cold-weather and headwind ranges:
+//   - 32°F (0°C): -10 to -15% economy → +12-18% consumption
+//   - 0°F (-18°C): -22 to -33% economy → +28-50% consumption
+//   - -40°F (-40°C): -40 to -50% economy → +66-100% consumption
+//   - 25 mph (40 km/h) headwind: +10% consumption
+//   - Light snow: +10-15%, heavy snow / blizzard: +20-30%
+// Used multiplicatively on top of the user's manual condition checkboxes —
+// expect some compounding; that's intentional.
 function weatherFuelMultiplier(w) {
   if (!w) return 1.0;
   let m = 1.0;
-  // Temperature
-  if (w.tempC <= -15)      m += 0.12;
-  else if (w.tempC <= -5)  m += 0.07;
-  else if (w.tempC <= 5)   m += 0.03;
-  else if (w.tempC >= 35)  m += 0.05;
-  else if (w.tempC >= 28)  m += 0.02;
+
+  // Temperature: smooth ramp at extremes since cold-start losses compound.
+  const t = w.tempC;
+  if (isFinite(t)) {
+    if      (t <= -35) m += 0.50; // arctic
+    else if (t <= -25) m += 0.35;
+    else if (t <= -15) m += 0.22;
+    else if (t <=  -5) m += 0.14;
+    else if (t <=   5) m += 0.07;
+    else if (t <=  12) m += 0.03;
+    // 12-28°C is the ideal band — no adjustment.
+    else if (t >=  38) m += 0.08; // extreme heat: AC max + thermal stress
+    else if (t >=  32) m += 0.04;
+    else if (t >=  28) m += 0.02;
+  }
+
   // Precipitation (WMO weather codes)
   const wc = w.weatherCode ?? 0;
-  if (wc >= 71 && wc <= 77)              m += 0.10; // snow
-  else if (wc >= 95 && wc <= 99)         m += 0.06; // thunderstorm
-  else if (wc >= 80 && wc <= 86)         m += 0.05; // rain showers
-  else if (wc >= 51 && wc <= 67)         m += 0.03; // drizzle / rain
-  else if (wc >= 45 && wc <= 48)         m += 0.02; // fog
-  // Wind — assume worst-case headwind
-  if (w.windKmh >= 50)      m += 0.05;
-  else if (w.windKmh >= 30) m += 0.02;
+  if      (wc >= 75 && wc <= 77) m += 0.22; // heavy snow / ice pellets
+  else if (wc >= 71 && wc <= 74) m += 0.13; // moderate snow
+  else if (wc >= 85 && wc <= 86) m += 0.11; // snow showers
+  else if (wc >= 95 && wc <= 99) m += 0.08; // thunderstorm
+  else if (wc >= 80 && wc <= 82) m += 0.06; // rain showers
+  else if (wc >= 61 && wc <= 67) m += 0.04; // rain
+  else if (wc >= 51 && wc <= 57) m += 0.02; // drizzle
+  else if (wc >= 45 && wc <= 48) m += 0.02; // fog (slower speeds)
+
+  // Wind: assumes the trip averages to roughly half-headwind exposure.
+  const wk = w.windKmh;
+  if (isFinite(wk)) {
+    if      (wk >= 70) m += 0.15;
+    else if (wk >= 50) m += 0.09;
+    else if (wk >= 35) m += 0.05;
+    else if (wk >= 25) m += 0.03;
+  }
+
   return m;
 }
 
@@ -830,27 +861,40 @@ function describeWeatherCode(wc) {
 }
 
 // Open-Meteo is free, key-less, and CORS-friendly. We sample current weather
-// at the route's geographic midpoint (good enough for a fuel-cost estimate;
-// trips that span multiple climate zones will smear, but the magnitude of
-// weather adjustments is small enough that this isn't worth fixing).
+// at three points (start, middle, dest) so the user sees how conditions change
+// across the route. Returns { samples: [{label, lat, lon, tempC, ...}, ...],
+// midpoint } where midpoint is samples[1] (used by the fuel multiplier).
 async function fetchRouteWeather(route) {
   const coords = route?.coords;
   if (!coords || coords.length < 2) return null;
-  const mid = coords[Math.floor(coords.length / 2)];
-  const [lon, lat] = mid;
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=temperature_2m,precipitation,wind_speed_10m,weather_code&wind_speed_unit=kmh`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const c = data.current || {};
-    return {
-      tempC: c.temperature_2m,
-      precip: c.precipitation,
-      windKmh: c.wind_speed_10m,
-      weatherCode: c.weather_code,
-    };
-  } catch { return null; }
+  const sampleAt = [
+    { label: 'Start',  i: 0 },
+    { label: 'Mid',    i: Math.floor(coords.length / 2) },
+    { label: 'End',    i: coords.length - 1 },
+  ];
+  const fetchOne = async ({ label, i }) => {
+    const [lon, lat] = coords[i];
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=temperature_2m,precipitation,wind_speed_10m,weather_code&wind_speed_unit=kmh`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const c = data.current || {};
+      return {
+        label, lat, lon,
+        tempC: c.temperature_2m,
+        precip: c.precipitation,
+        windKmh: c.wind_speed_10m,
+        weatherCode: c.weather_code,
+      };
+    } catch { return null; }
+  };
+  const samples = (await Promise.all(sampleAt.map(fetchOne))).filter(Boolean);
+  if (samples.length === 0) return null;
+  // Use the middle sample for the consumption multiplier — good enough since
+  // weather effects on fuel economy are roughly continuous across the trip.
+  const midpoint = samples.find(s => s.label === 'Mid') || samples[Math.floor(samples.length / 2)];
+  return { samples, midpoint };
 }
 
 function totalDistanceKm() {
@@ -1277,12 +1321,30 @@ function renderPriceChart() {
   host.hidden = false;
 
   // Convert prices into the user's display unit so the chart axis matches the input box.
+  // History rows store regular (always) and diesel (where available). Mid and
+  // premium aren't tracked historically, so derive them from regular using the
+  // CURRENT mid/regular and premium/regular ratios — best we can do without a
+  // historical mid/premium feed.
   const native = priceUnitFor(state.country);
-  const allPoints = history.map(h => ({
-    date: h.date,
-    ts: new Date(h.date).getTime(),
-    value: pricePerLToDisplay(priceDisplayToPerL(h.regular, native), usSys.volume),
-  })).sort((a, b) => a.ts - b.ts);
+  const fuel = state.fuelType || 'regular';
+  const ratio = (def.regular > 0)
+    ? { mid: def.mid / def.regular, premium: def.premium / def.regular, diesel: def.diesel / def.regular }
+    : { mid: 1, premium: 1, diesel: 1 };
+  const histRawValue = h => {
+    if (fuel === 'regular') return h.regular;
+    if (fuel === 'diesel')  return isFinite(h.diesel) ? h.diesel : h.regular * ratio.diesel;
+    if (fuel === 'mid')     return isFinite(h.mid)    ? h.mid    : h.regular * ratio.mid;
+    if (fuel === 'premium') return isFinite(h.premium)? h.premium: h.regular * ratio.premium;
+    return h.regular;
+  };
+  const allPoints = history
+    .filter(h => isFinite(h.regular))
+    .map(h => ({
+      date: h.date,
+      ts: new Date(h.date).getTime(),
+      value: pricePerLToDisplay(priceDisplayToPerL(histRawValue(h), native), usSys.volume),
+    }))
+    .sort((a, b) => a.ts - b.ts);
 
   // Filter by selected range, anchored on the latest data point.
   const lastTs = allPoints[allPoints.length - 1].ts;
@@ -1295,7 +1357,7 @@ function renderPriceChart() {
   if (n < 3) {
     host.innerHTML = `
       <div class="chart-header">
-        <span class="chart-title">${escapeHtml(def.label)} · ${escapeHtml(range.titleLabel)}</span>
+        <span class="chart-title">${escapeHtml(def.label)} · ${escapeHtml(fuel)} · ${escapeHtml(range.titleLabel)}</span>
       </div>
       ${tabsHtml}
       <p class="chart-empty">Only ${n} data point${n === 1 ? '' : 's'} in this window — try a longer range.</p>
@@ -1304,26 +1366,34 @@ function renderPriceChart() {
     return;
   }
 
-  // Linear regression on (index, value) so we project 4 steps forward.
-  const xs = points.map((_, i) => i);
-  const ys = points.map(p => p.value);
-  const xMean = xs.reduce((a, b) => a + b, 0) / n;
-  const yMean = ys.reduce((a, b) => a + b, 0) / n;
-  let num = 0, den = 0;
-  for (let i = 0; i < n; i++) {
-    num += (xs[i] - xMean) * (ys[i] - yMean);
-    den += (xs[i] - xMean) ** 2;
+  // ----- TREND: computed from a FIXED 12-week window of the full history -----
+  // The prediction shouldn't change when the user switches view: the trend is
+  // a property of recent prices, not of the chart's zoom level. We fit a line
+  // to the last min(12, allPoints.length) data points and project 4 weeks forward.
+  // The same projection line is drawn on every range view.
+  const TREND_WINDOW = 12;
+  const trendPts = allPoints.slice(-TREND_WINDOW);
+  const tn = trendPts.length;
+  const txs = trendPts.map((_, i) => i);
+  const tys = trendPts.map(p => p.value);
+  const txMean = txs.reduce((a, b) => a + b, 0) / tn;
+  const tyMean = tys.reduce((a, b) => a + b, 0) / tn;
+  let tnum = 0, tden = 0;
+  for (let i = 0; i < tn; i++) {
+    tnum += (txs[i] - txMean) * (tys[i] - tyMean);
+    tden += (txs[i] - txMean) ** 2;
   }
-  const slope = den === 0 ? 0 : num / den;
-  const intercept = yMean - slope * xMean;
+  const slope = tden === 0 ? 0 : tnum / tden; // value per week
   const projSteps = 4;
+  // Projected points start AT the latest actual point and step forward by `slope`.
+  const lastActualValue = allPoints[allPoints.length - 1].value;
   const projected = [];
   for (let i = 1; i <= projSteps; i++) {
-    projected.push({ x: n - 1 + i, value: slope * (n - 1 + i) + intercept });
+    projected.push({ x: n - 1 + i, value: lastActualValue + slope * i });
   }
 
   // Plot bounds — share Y between actual and projection so they're on the same scale.
-  const allY = [...ys, ...projected.map(p => p.value)];
+  const allY = [...points.map(p => p.value), ...projected.map(p => p.value)];
   const yMin = Math.min(...allY);
   const yMax = Math.max(...allY);
   const yPad = Math.max(0.05, (yMax - yMin) * 0.15);
@@ -1390,24 +1460,22 @@ function renderPriceChart() {
       `<text x="${xToPx(totalSteps).toFixed(1)}" y="${H - 6}" class="chart-x-label" text-anchor="end">+${projSteps}w</text>`;
   }
 
-  // Trend label
-  const last = points[n - 1].value;
+  // Trend label — derived from the FIXED 12-week trend window, not the visible
+  // window, so the same prediction shows on every range view.
   const future = projected[projSteps - 1].value;
-  const deltaPct = last > 0 ? ((future - last) / last) * 100 : 0;
+  const deltaPct = lastActualValue > 0 ? ((future - lastActualValue) / lastActualValue) * 100 : 0;
   const trendDir = Math.abs(deltaPct) < 0.5 ? 'flat' : (deltaPct > 0 ? 'up' : 'down');
   const trendArrow = trendDir === 'up' ? '↗' : trendDir === 'down' ? '↘' : '→';
   const trendText = trendDir === 'flat'
     ? 'Flat trend'
     : `${deltaPct > 0 ? '+' : ''}${deltaPct.toFixed(1)}% in 4w (trend)`;
 
-  // Title says what the user picked (range.titleLabel) plus how many actual data
-  // points are visible. Adds a "less data available" note when the requested
-  // window is larger than our history (e.g. 1Y view but we only have 5 months).
   const truncatedNote = (range.days && allPoints.length > 0
     && allPoints[0].ts > lastTs - range.days * 86400000)
     ? ' · (less data available than the range)'
     : '';
-  const titleSpan = `${range.titleLabel} · ${n} pts${truncatedNote}`;
+  const fuelLabel = fuel === 'mid' ? 'mid-grade' : fuel;
+  const titleSpan = `${fuelLabel} · ${range.titleLabel} · ${n} pts${truncatedNote}`;
 
   host.innerHTML = `
     <div class="chart-header">
@@ -1715,6 +1783,10 @@ async function onYearChange(role, year) {
   const c = comboGroup(role);
   c.make.clear(); c.model.clear(); c.trim.clear();
   c.make.setDisabled(true); c.model.setDisabled(true); c.trim.setDisabled(true);
+  // Update placeholders so the user sees what's needed next, not stale "Pick X first"
+  c.make.setPlaceholder(year ? 'Pick a make' : 'Pick year first');
+  c.model.setPlaceholder('Make first');
+  c.trim.setPlaceholder('Model first');
   if (role === 'primary') state.pickedVehicle = null;
   else state.cmpPickedVehicle = null;
   update();
@@ -1732,6 +1804,8 @@ async function onMakeChange(role, make) {
   const c = comboGroup(role);
   c.model.clear(); c.trim.clear();
   c.model.setDisabled(true); c.trim.setDisabled(true);
+  c.model.setPlaceholder(make ? 'Pick a model' : 'Make first');
+  c.trim.setPlaceholder('Model first');
   if (role === 'primary') state.pickedVehicle = null;
   else state.cmpPickedVehicle = null;
   update();
@@ -1749,6 +1823,7 @@ async function onMakeChange(role, make) {
 async function onModelChange(role, model) {
   const c = comboGroup(role);
   c.trim.clear(); c.trim.setDisabled(true);
+  c.trim.setPlaceholder(model ? 'Pick a trim' : 'Model first');
   if (role === 'primary') state.pickedVehicle = null;
   else state.cmpPickedVehicle = null;
   update();
@@ -3079,6 +3154,37 @@ function selectRoute(idx) {
 
   // Kick off (or refresh from cache) the toll/ferry estimate for this route.
   applyTollFerryEstimate(idx);
+
+  // If the route is long enough that the user's tank can't make it in one go,
+  // auto-suggest fuel stops along the way. Only fires when no stops have been
+  // set yet — once the user has added their own, we leave the route alone.
+  maybeAutoSuggestFuelStops();
+}
+
+// Conservative trigger for "Suggest fuel stops": only when there's a route,
+// the user has a tank size, no stops are already set, and the trip exceeds
+// 70% of the tank range. The suggestFuelStops() call sets stops and
+// re-fetches; the resulting selectRoute sees stops.length > 0 and skips.
+function maybeAutoSuggestFuelStops() {
+  if (!map.routes.length || !map.routes[map.activeRoute]) return;
+  if ((map.stops || []).length > 0) return;
+  if (!state.tankSize || state.tankSize <= 0) return;
+
+  const baseL = effectiveL100km(state.pickedVehicle, state.customEff, state.vehicleMode, state.cityMixPct);
+  const wMult = weatherFuelMultiplier(state.routeWeather);
+  const adjL = applyAdjustments(baseL, state.drivingStyle, state.conditions, wMult);
+  if (!adjL) return;
+
+  const us = UNIT_SYSTEMS[state.unitSystem];
+  const tankL = toLitre(state.tankSize, us.volume);
+  const tankRangeKm = (tankL / adjL) * 100;
+  const totalKm = map.routes[map.activeRoute].distance / 1000;
+  if (totalKm < tankRangeKm * 0.7) return;
+
+  // Don't block the active call stack — suggestFuelStops runs Overpass queries
+  // and re-fetches the route, which would interleave awkwardly with selectRoute's
+  // downstream work.
+  setTimeout(() => suggestFuelStops(), 60);
 }
 
 // Compute (or pull cached) weather at the route midpoint and apply it. Causes
@@ -3090,11 +3196,59 @@ async function applyRouteWeather(idx) {
   if (route.weather === undefined) {
     route.weather = null; // mark as "in flight" so we don't refetch
     const w = await fetchRouteWeather(route);
-    route.weather = w;
+    route.weather = w; // { samples: [...], midpoint: {...} } | null
   }
   if (idx !== map.activeRoute) return;
-  state.routeWeather = route.weather;
+  // state.routeWeather kept as the midpoint reading for the fuel multiplier and
+  // the trip-summary row; full samples drive the new "weather along your route" card.
+  state.routeWeather = route.weather?.midpoint || null;
+  state.routeWeatherSamples = route.weather?.samples || null;
+  renderWeatherCard();
   update();
+}
+
+// Render the right-column "Weather along your route" card with multi-point
+// samples. Hides the static Quick Tips card while a route is loaded so the
+// space is used for actually-relevant info.
+function renderWeatherCard() {
+  const card  = $('weatherCard');
+  const tips  = $('tipsCard');
+  const body  = $('weatherForecastBody');
+  const samples = state.routeWeatherSamples || [];
+  if (!card || !body) return;
+
+  if (!samples.length) {
+    card.hidden = true;
+    if (tips) tips.hidden = false;
+    return;
+  }
+  card.hidden = false;
+  if (tips) tips.hidden = true;
+
+  // Compute the worst-case multiplier across all samples — a single midpoint
+  // reading underweights e.g. a snowstorm at the destination but clear at the
+  // start. Worst-of-three is conservative but honest for trip planning.
+  const worstMult = samples.reduce((max, s) => Math.max(max, weatherFuelMultiplier(s)), 1.0);
+  const worstPct = Math.round((worstMult - 1) * 100);
+
+  const rowsHtml = samples.map(s => {
+    const [emoji, label] = describeWeatherCode(s.weatherCode);
+    const wind = isFinite(s.windKmh) && s.windKmh >= 15 ? ` · 💨 ${Math.round(s.windKmh)} km/h` : '';
+    return `
+      <div class="weather-row">
+        <span class="weather-where">${escapeHtml(s.label)}</span>
+        <span class="weather-emoji" aria-hidden="true">${emoji}</span>
+        <span class="weather-temp">${Math.round(s.tempC)}°C</span>
+        <span class="weather-cond">${escapeHtml(label)}${wind}</span>
+      </div>
+    `;
+  }).join('');
+
+  const summary = worstPct > 0
+    ? `<p class="weather-summary">Worst-case fuel impact along this route: <strong>+${worstPct}%</strong></p>`
+    : `<p class="weather-summary">No significant weather drag on fuel use.</p>`;
+
+  body.innerHTML = rowsHtml + summary;
 }
 
 // Compute, cache, and apply a toll/ferry estimate for a route. If the user has
@@ -3417,6 +3571,9 @@ function stationPopupHtml(station) {
     <strong>${escapeHtml(name)}</strong>
     ${brand && brand.toLowerCase() !== name.toLowerCase() ? `<div class="popup-sub">${escapeHtml(brand)}</div>` : ''}
     ${savedHtml}
+    <button class="popup-stop popup-stop-primary" type="button" data-add-stop>
+      ➕ Add as fuel stop on this route
+    </button>
     <a href="${gbUrl}" target="_blank" rel="noopener noreferrer" class="popup-gb-primary" title="Open this station on GasBuddy in a new tab">
       ⛽ Check GasBuddy for live price
     </a>
@@ -3429,7 +3586,6 @@ function stationPopupHtml(station) {
       </div>
       <button class="popup-apply" type="button" data-apply-price>Use this price</button>
     </div>
-    <button class="popup-stop" type="button" data-add-stop>➕ Add as fuel stop</button>
   </div>`;
 }
 
