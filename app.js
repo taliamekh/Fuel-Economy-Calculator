@@ -2757,6 +2757,8 @@ const AVOID_DISPLAY = {
   tollways:      { label: 'No tolls',            color: '#FB7185' },
   ferries:       { label: 'No ferries',          color: '#22D3EE' },
   stayInCountry: { label: 'No border crossings', color: '#E11D48' },
+  eco:           { label: 'Eco (back roads)',    color: '#84CC16' },
+  scenic:        { label: 'Scenic',              color: '#0EA5E9' },
 };
 
 async function routeViaORS(waypoints, avoidFeatures, opts = {}) {
@@ -2775,15 +2777,20 @@ async function routeViaORS(waypoints, avoidFeatures, opts = {}) {
     };
   };
 
-  // Always run the 3 base preferences (no avoid) so the user sees the
-  // baseline Fastest / Most-efficient / Balanced cards no matter which avoid
-  // boxes they tick. Then, for each enabled avoid, run ONE additional fastest
-  // call with that avoid applied — those become extra route cards displayed
-  // alongside the baseline rather than replacing it.
+  // Three baseline preferences (Fastest / Most efficient / Balanced) +
+  // two presets we always offer:
+  //   - Eco: shortest distance, no highways → low-speed back roads, often
+  //     better for fuel economy on most cars (engines hit peak efficiency
+  //     in the 50-90 km/h sweet spot)
+  //   - Scenic: balanced preference, no highways or tolls → relaxed pace
+  //     without rushing or paying — good for road trips
+  // Plus one extra call for each user-checked avoid (additive layer on top).
   const calls = [
-    { tag: null,            body: makeBody([], false, 'fastest') },
-    { tag: null,            body: makeBody([], false, 'shortest') },
-    { tag: null,            body: makeBody([], false, 'recommended') },
+    { tag: null,    body: makeBody([], false, 'fastest') },
+    { tag: null,    body: makeBody([], false, 'shortest') },
+    { tag: null,    body: makeBody([], false, 'recommended') },
+    { tag: 'eco',    body: makeBody(['highways'], false, 'shortest') },
+    { tag: 'scenic', body: makeBody(['highways', 'tollways'], false, 'recommended') },
   ];
   for (const f of avoidFeatures) {
     calls.push({ tag: f, body: makeBody([f], false, 'fastest') });
@@ -2997,12 +3004,11 @@ async function handleDistanceLookup() {
     const noteSuffix = avoidNoteSuffix();
     hint.textContent = `✓ ${map.routes.length} route${map.routes.length > 1 ? 's' : ''} found. Click a route to use it.${noteSuffix}`;
 
-    // Stations need a fresh load for the new origin/dest pair (different geographic area)
+    // selectRoute() drives station load, weather, toll-ferry, and auto-suggest.
+    // It only fetches stations for the active route — no leftover stations from
+    // alternates clutter the map.
     if (map.instance) clearStationLayer();
-
-    selectRoute(map.activeRoute); // updates display + calculator, no station reload
-    // Now load stations for the union of all routes
-    loadStationsForAllRoutes();
+    selectRoute(map.activeRoute);
   } catch (e) {
     // Wipe any previous route state so the failure message isn't shown next to a
     // visibly successful old route — the most common confused-state bug when you
@@ -3257,14 +3263,17 @@ function selectRoute(idx) {
   $('distanceInput').value = String(display);
   update();
 
-  if (map.instance) plotRoutes(); // clears + redraws ROUTE layers only — stations stay
+  if (map.instance) plotRoutes(); // redraws route polylines (active highlighted)
   renderRouteAlts();
 
-  // Update info bar without disturbing stations.
-  const cnt = map.stationCount || 0;
-  $('mapInfo').textContent = cnt > 0
-    ? `${cnt} fuel stations · ${fmtNumber(km, 1)} km active route`
-    : `${fmtNumber(km, 1)} km active route`;
+  // Update info bar.
+  $('mapInfo').textContent = `${fmtNumber(km, 1)} km active route`;
+
+  // Stations are route-specific — reload them whenever the active route changes
+  // so the user only sees stations along the path they're actually taking.
+  // Caching the stations per route would also work, but a fresh fetch keeps
+  // station data current without an explicit invalidation.
+  loadStationsForActiveRoute();
 
   // Update active-route weather. Cached on the route the first time so route
   // switching is instant after that.
@@ -3480,27 +3489,54 @@ function renderTollFerryNote(est, status) {
   note.innerHTML = `<span class="auto-note-icon">🛣️</span><span><strong>Route includes:</strong> ${parts.join(' · ')}${editedHint}</span>`;
 }
 
-// Load gas stations once for all routes' union — kept stable across route switches.
-async function loadStationsForAllRoutes() {
+// Load gas stations only along the user's CURRENTLY-SELECTED route. Switching
+// routes triggers a fresh load — old behavior was to load the union of all
+// routes' bbox, which left irrelevant stations from rejected alternatives on
+// the map. Shows a visible loading badge over the map while in flight.
+async function loadStationsForActiveRoute() {
   if (!map.instance || !map.routes.length) return;
+  const route = map.routes[map.activeRoute];
+  if (!route) return;
   const myGen = ++stationGen;
+  showStationsLoading(true);
   $('mapInfo').textContent = 'Searching gas stations…';
-  // Combine all route coords for a wider corridor search
-  const allLatLngs = [];
-  for (const r of map.routes) {
-    for (const c of r.coords) allLatLngs.push([c[1], c[0]]);
-  }
+  // Convert ORS/OSRM [lon,lat] into [lat,lng] tuples for the rest of the pipeline.
+  const routeLatLngs = route.coords.map(c => [c[1], c[0]]);
   try {
-    const count = await loadGasStationsAlongRoute(allLatLngs);
-    if (myGen !== stationGen) return; // stale
+    const count = await loadGasStationsAlongRoute(routeLatLngs);
+    if (myGen !== stationGen) return; // a newer load superseded this one
     map.stationCount = count;
-    const km = map.routes[map.activeRoute].distance / 1000;
+    const km = route.distance / 1000;
     $('mapInfo').textContent = `${count} fuel stations · ${fmtNumber(km, 1)} km active route`;
   } catch (err) {
     if (myGen !== stationGen) return;
     map.stationCount = 0;
-    const km = map.routes[map.activeRoute].distance / 1000;
+    const km = route.distance / 1000;
     $('mapInfo').textContent = `${fmtNumber(km, 1)} km route · stations unavailable`;
+  } finally {
+    if (myGen === stationGen) showStationsLoading(false);
+  }
+}
+
+// Backward-compat alias — older call sites still use the previous name.
+const loadStationsForAllRoutes = loadStationsForActiveRoute;
+
+// Shows / hides a clearly-visible loading overlay on the map while station
+// data fetches. Long routes can take 15-30s on Overpass under load — without
+// this users assume the app is broken.
+function showStationsLoading(active) {
+  let overlay = document.getElementById('mapStationLoader');
+  if (active) {
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'mapStationLoader';
+      overlay.className = 'map-station-loader';
+      overlay.innerHTML = '<span class="map-loader-spinner"></span><span>Searching fuel stations along your route…</span>';
+      document.querySelector('.map-container')?.appendChild(overlay);
+    }
+    overlay.hidden = false;
+  } else if (overlay) {
+    overlay.hidden = true;
   }
 }
 
@@ -3647,19 +3683,46 @@ function attachAddressAutocomplete(inputEl, dropdownEl, onSelect) {
 }
 
 async function loadGasStationsAlongRoute(routeLatLngs) {
-  // Compute bounding box
-  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
-  for (const [lat, lng] of routeLatLngs) {
-    if (lat < minLat) minLat = lat;
-    if (lat > maxLat) maxLat = lat;
-    if (lng < minLng) minLng = lng;
-    if (lng > maxLng) maxLng = lng;
-  }
-  const padLat = Math.max(0.01, (maxLat - minLat) * 0.04);
-  const padLng = Math.max(0.01, (maxLng - minLng) * 0.04);
-  const bbox = `${minLat - padLat},${minLng - padLng},${maxLat + padLat},${maxLng + padLng}`;
+  // Old approach: one Overpass query against the route's full bbox, then
+  // filter client-side to within 2.5km of the polyline. For a Toronto-Vancouver
+  // route the bbox covers ~5 million km² — Overpass would return tens of
+  // thousands of stations and frequently time out on the public instance.
+  //
+  // New approach: sample the polyline every ~8km and ask Overpass for fuel
+  // amenities WITHIN 2500m of those sample points only. The "around" filter
+  // does the spatial work server-side, the corridor stays narrow regardless
+  // of route length, and queries finish in seconds even on cross-continent
+  // trips.
+  const SAMPLE_KM = 8;
+  const RADIUS_M = 2500;
 
-  const query = `[out:json][timeout:25];node["amenity"="fuel"](${bbox});out body 200;`;
+  // Walk the polyline accumulating distance; emit a sample every SAMPLE_KM.
+  const samples = [];
+  if (routeLatLngs.length) samples.push(routeLatLngs[0]);
+  let walked = 0;
+  for (let i = 1; i < routeLatLngs.length; i++) {
+    const [lat0, lng0] = routeLatLngs[i - 1];
+    const [lat1, lng1] = routeLatLngs[i];
+    walked += haversineKm(lat0, lng0, lat1, lng1);
+    if (walked >= SAMPLE_KM) {
+      samples.push(routeLatLngs[i]);
+      walked = 0;
+    }
+  }
+  // Always include the destination so we don't miss the last 8km.
+  if (routeLatLngs.length) samples.push(routeLatLngs[routeLatLngs.length - 1]);
+
+  // Cap how many anchors we send — the Overpass URL has size limits, and
+  // 250 anchors × 8km = 2,000km of corridor, which is plenty for any trip.
+  const CAP = 250;
+  const sampled = samples.length > CAP
+    ? samples.filter((_, i) => i % Math.ceil(samples.length / CAP) === 0)
+    : samples;
+
+  const aroundClauses = sampled
+    .map(([lat, lng]) => `node["amenity"="fuel"](around:${RADIUS_M},${lat.toFixed(4)},${lng.toFixed(4)});`)
+    .join('');
+  const query = `[out:json][timeout:30];(${aroundClauses});out body 250;`;
   const res = await fetch('https://overpass-api.de/api/interpreter', {
     method: 'POST',
     body: 'data=' + encodeURIComponent(query),
@@ -3667,11 +3730,18 @@ async function loadGasStationsAlongRoute(routeLatLngs) {
   });
   if (!res.ok) throw new Error('Overpass error');
   const data = await res.json();
-  let stations = data.elements || [];
-  // Filter to within ~2.5km of route polyline
+  // Dedupe — overlapping `around:` buffers will return the same node multiple times.
+  const seen = new Set();
+  let stations = (data.elements || []).filter(s => {
+    if (seen.has(s.id)) return false;
+    seen.add(s.id);
+    return true;
+  });
+  // Final 2.5km client-side filter against the actual polyline (narrows down
+  // any anchor-corridor over-spill).
   stations = stations.filter(s => isNearRoute(s.lat, s.lon, routeLatLngs, 2.5));
   // Limit
-  stations = stations.slice(0, 60);
+  stations = stations.slice(0, 80);
 
   if (map.stationLayer) map.instance.removeLayer(map.stationLayer);
   map.stationLayer = L.layerGroup().addTo(map.instance);
