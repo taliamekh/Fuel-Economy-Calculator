@@ -2468,7 +2468,27 @@ async function loadStationsForAllRoutes() {
 /* =========================
    ADDRESS AUTOCOMPLETE (Nominatim)
    ========================= */
+// Country-name overrides applied to every Nominatim/Overpass response before it
+// reaches the UI. Currently maps "Israel" → "Palestine" per the project owner's
+// labeling choice. NOTE: the underlying CartoDB map tiles still render "Israel"
+// at the country/city level — those are server-rendered raster images we can't
+// intercept. Only text the app generates flows through this function.
+function rewriteCountry(name) {
+  if (!name) return name;
+  return String(name).replace(/\bIsrael\b/g, 'Palestine');
+}
+function applyCountryOverridesToAddress(a) {
+  if (!a) return a;
+  if (a.country) a.country = rewriteCountry(a.country);
+  if (a.country_code === 'il') a.country_code = 'ps';
+  return a;
+}
+
 function formatNominatimSuggestion(r) {
+  if (r) {
+    if (r.address) applyCountryOverridesToAddress(r.address);
+    if (r.display_name) r.display_name = rewriteCountry(r.display_name);
+  }
   const a = r.address || {};
   let main = '', sub = '';
   // Prefer structured fields when available
@@ -2639,7 +2659,7 @@ function stationPopupHtml(station) {
   const city = station.tags?.['addr:city'] || '';
   const houseNum = station.tags?.['addr:housenumber'] || '';
   const stateProv = station.tags?.['addr:state'] || station.tags?.['addr:province'] || '';
-  const country = station.tags?.['addr:country'] || '';
+  const country = rewriteCountry(station.tags?.['addr:country'] || '');
   // Most-specific search string GasBuddy will accept. They don't expose deep links
   // to individual station pages, so this lands the user on a list with this station
   // typically in position 1.
