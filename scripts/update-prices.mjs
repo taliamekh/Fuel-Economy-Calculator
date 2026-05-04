@@ -22,7 +22,12 @@ import { dirname, resolve } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PRICES_PATH = resolve(HERE, '..', 'data', 'prices.json');
-const HISTORY_CAP = 26;
+// Cap of stored weekly data points per region. 104 ≈ 2 years of weekly data,
+// enough to make 1M / 6M / 1Y / All chart ranges produce distinct views.
+const HISTORY_CAP = 104;
+// `--backfill` triggers a multi-year NRCan fetch (2-year window) to seed the
+// chart with deep history on first run. Daily runs just append the latest week.
+const BACKFILL_MODE = process.argv.includes('--backfill');
 
 const UA = 'Mozilla/5.0 (compatible; trip-fuel-cost-bot/1.0)';
 
@@ -105,10 +110,11 @@ const NRCAN_CITY_TO_PROVINCE = {
   'Yellowknife':   'CA_NT',
 };
 const NRCAN_LOCATION_IDS = [66, 2, 10, 8, 12, 15, 17, 18, 28, 29, 33, 39, 43, 44, 1, 7];
-const NRCAN_URL =
-  'https://www2.nrcan.gc.ca/eneene/sources/pripri/prices_bycity_e.cfm?productID=1&priceYear=' +
-  new Date().getFullYear() + '&frequency=W' +
-  NRCAN_LOCATION_IDS.map(id => `&locationID=${id}`).join('');
+function buildNRCanUrl(year) {
+  return 'https://www2.nrcan.gc.ca/eneene/sources/pripri/prices_bycity_e.cfm?productID=1&priceYear='
+    + year + '&frequency=W'
+    + NRCAN_LOCATION_IDS.map(id => `&locationID=${id}`).join('');
+}
 
 async function fetchText(url) {
   const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept': 'text/html' } });
@@ -353,28 +359,46 @@ async function main() {
   }
 
   // --- Canada ---
-  try {
-    const html = await fetchText(NRCAN_URL);
-    const cityData = parseNRCan(html); // { city: { regular, history: [...] } }
-    if (Object.keys(cityData).length === 0) {
-      console.warn('[update-prices] NRCan: no cities matched. Keeping CA values.');
-    } else {
-      // Group city histories by province, then average across cities per date.
-      const histByKey = {};
+  // Default: this year's weekly fuel prices. Backfill mode: also pulls the
+  // previous two years so the chart has 2y of weekly data on first run.
+  const thisYear = new Date().getFullYear();
+  const yearsToFetch = BACKFILL_MODE
+    ? [thisYear - 2, thisYear - 1, thisYear]
+    : [thisYear];
+
+  // Aggregate per-city histories across all fetched years before the
+  // province-averaging step.
+  const aggregated = {}; // { city: { history: [...] } }
+  for (const year of yearsToFetch) {
+    try {
+      const html = await fetchText(buildNRCanUrl(year));
+      const cityData = parseNRCan(html);
       for (const [city, info] of Object.entries(cityData)) {
-        const key = NRCAN_CITY_TO_PROVINCE[city];
-        if (!key) continue;
-        (histByKey[key] ||= []).push(info.history || []);
+        if (!aggregated[city]) aggregated[city] = { history: [] };
+        aggregated[city].history.push(...(info.history || []));
       }
-      for (const [key, cityHistories] of Object.entries(histByKey)) {
-        const merged = avgHistoriesByDate(cityHistories);
-        if (merged.length === 0) continue;
-        const latest = merged[merged.length - 1];
-        applyRefresh(data, key, { regular: latest.regular, history: merged }, changes, 'CA');
-      }
+      console.log(`[update-prices] NRCan ${year}: ${Object.keys(cityData).length} cities × ~${cityData[Object.keys(cityData)[0]]?.history?.length || 0} weeks`);
+    } catch (err) {
+      console.warn(`[update-prices] NRCan ${year} fetch/parse failed: ${err.message}.`);
     }
-  } catch (err) {
-    console.warn(`[update-prices] NRCan fetch/parse failed: ${err.message}. Keeping CA values.`);
+  }
+
+  if (Object.keys(aggregated).length === 0) {
+    console.warn('[update-prices] NRCan: no cities matched any year. Keeping CA values.');
+  } else {
+    // Group city histories by province, then average across cities per date.
+    const histByKey = {};
+    for (const [city, info] of Object.entries(aggregated)) {
+      const key = NRCAN_CITY_TO_PROVINCE[city];
+      if (!key) continue;
+      (histByKey[key] ||= []).push(info.history || []);
+    }
+    for (const [key, cityHistories] of Object.entries(histByKey)) {
+      const merged = avgHistoriesByDate(cityHistories);
+      if (merged.length === 0) continue;
+      const latest = merged[merged.length - 1];
+      applyRefresh(data, key, { regular: latest.regular, history: merged }, changes, 'CA');
+    }
   }
 
   // --- Stamp + write ---
