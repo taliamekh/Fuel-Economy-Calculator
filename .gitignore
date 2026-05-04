@@ -1,0 +1,7 @@
+.DS_Store
+Thumbs.db
+*.log
+node_modules/
+
+# Local-only Claude Code settings (per-machine permissions)
+.claude/settings.local.json
