@@ -191,12 +191,17 @@ const state = {
   vehicleMode: 'pick',
   pickedVehicle: null,
   customEff: 0,
+  // Saved vehicles for quick selection. Most-recently-loaded sits at index 0.
+  savedVehicles: [],
 
   fuelType: 'regular',
   price: 0,
   priceTouched: false,
   chartRange: '6m',
   tollsTouched: false,
+  // Current Open-Meteo reading for the active route's midpoint. Doesn't persist —
+  // re-fetched whenever a new route is computed.
+  routeWeather: null,
 
   cityMixPct: 45,
   drivingStyle: 'normal',
@@ -556,6 +561,8 @@ function saveState() {
     const slim = {
       country: state.country, region: state.region, unitSystem: state.unitSystem,
       vehicleMode: state.vehicleMode, customEff: state.customEff,
+      pickedVehicle: state.pickedVehicle,
+      savedVehicles: state.savedVehicles,
       fuelType: state.fuelType, priceTouched: state.priceTouched, price: state.price,
       cityMixPct: state.cityMixPct, drivingStyle: state.drivingStyle,
       conditions: state.conditions,
@@ -764,14 +771,79 @@ function effectiveL100km(vehicle, customEffDisplay, vehicleMode, cityMixPct) {
   return 0;
 }
 
-function applyAdjustments(baseL100km, style, conditions) {
+function applyAdjustments(baseL100km, style, conditions, weatherMult) {
   if (!baseL100km) return 0;
   const styleMult = STYLE_FUEL_MULT[style] ?? 1.0;
   let extra = 0;
   for (const [k, on] of Object.entries(conditions)) {
     if (on) extra += CONDITION_PENALTY[k] || 0;
   }
-  return baseL100km * styleMult * (1 + extra);
+  const wMult = isFinite(weatherMult) && weatherMult > 0 ? weatherMult : 1.0;
+  return baseL100km * styleMult * (1 + extra) * wMult;
+}
+
+// Compute a fuel-consumption multiplier from current weather conditions along
+// the route. Heuristics (rough): cold weather thickens fluids and forces the
+// engine to warm up, snow/rain increase rolling resistance, wind = potential
+// headwind. Numbers calibrated to industry-published ranges (DOE/AAA).
+function weatherFuelMultiplier(w) {
+  if (!w) return 1.0;
+  let m = 1.0;
+  // Temperature
+  if (w.tempC <= -15)      m += 0.12;
+  else if (w.tempC <= -5)  m += 0.07;
+  else if (w.tempC <= 5)   m += 0.03;
+  else if (w.tempC >= 35)  m += 0.05;
+  else if (w.tempC >= 28)  m += 0.02;
+  // Precipitation (WMO weather codes)
+  const wc = w.weatherCode ?? 0;
+  if (wc >= 71 && wc <= 77)              m += 0.10; // snow
+  else if (wc >= 95 && wc <= 99)         m += 0.06; // thunderstorm
+  else if (wc >= 80 && wc <= 86)         m += 0.05; // rain showers
+  else if (wc >= 51 && wc <= 67)         m += 0.03; // drizzle / rain
+  else if (wc >= 45 && wc <= 48)         m += 0.02; // fog
+  // Wind — assume worst-case headwind
+  if (w.windKmh >= 50)      m += 0.05;
+  else if (w.windKmh >= 30) m += 0.02;
+  return m;
+}
+
+// Friendly text for a WMO weather code + emoji.
+function describeWeatherCode(wc) {
+  if (wc === 0) return ['☀️', 'clear'];
+  if (wc <= 3)                  return ['⛅', 'partly cloudy'];
+  if (wc >= 45 && wc <= 48)     return ['🌫️', 'fog'];
+  if (wc >= 51 && wc <= 57)     return ['🌦️', 'drizzle'];
+  if (wc >= 61 && wc <= 67)     return ['🌧️', 'rain'];
+  if (wc >= 71 && wc <= 77)     return ['❄️', 'snow'];
+  if (wc >= 80 && wc <= 82)     return ['🌧️', 'rain showers'];
+  if (wc >= 85 && wc <= 86)     return ['🌨️', 'snow showers'];
+  if (wc >= 95)                 return ['⛈️', 'thunderstorm'];
+  return ['🌥️', 'overcast'];
+}
+
+// Open-Meteo is free, key-less, and CORS-friendly. We sample current weather
+// at the route's geographic midpoint (good enough for a fuel-cost estimate;
+// trips that span multiple climate zones will smear, but the magnitude of
+// weather adjustments is small enough that this isn't worth fixing).
+async function fetchRouteWeather(route) {
+  const coords = route?.coords;
+  if (!coords || coords.length < 2) return null;
+  const mid = coords[Math.floor(coords.length / 2)];
+  const [lon, lat] = mid;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lon.toFixed(3)}&current=temperature_2m,precipitation,wind_speed_10m,weather_code&wind_speed_unit=kmh`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const c = data.current || {};
+    return {
+      tempC: c.temperature_2m,
+      precip: c.precipitation,
+      windKmh: c.wind_speed_10m,
+      weatherCode: c.weather_code,
+    };
+  } catch { return null; }
 }
 
 function totalDistanceKm() {
@@ -788,7 +860,8 @@ function calculate() {
 
   // Primary vehicle
   const baseL = effectiveL100km(state.pickedVehicle, state.customEff, state.vehicleMode, state.cityMixPct);
-  const adjL = applyAdjustments(baseL, state.drivingStyle, state.conditions);
+  const wMult = weatherFuelMultiplier(state.routeWeather);
+  const adjL = applyAdjustments(baseL, state.drivingStyle, state.conditions, wMult);
 
   // Price (always normalized to $/L canonical)
   const priceCanonical = priceDisplayToPerL(state.price || 0, us.volume);
@@ -916,6 +989,30 @@ function updateDistanceHint() {
   }
 }
 
+// Interpolates a hex color between waypoint-start (A) and waypoint-end (B) at
+// position `pos` out of `total` segments. pos=0 → A's color, pos=total → B's.
+// Reads the actual CSS variables so it works in both dark and light themes.
+function waypointGradientColor(pos, total) {
+  const styles = getComputedStyle(document.documentElement);
+  const a = hexToRgb(styles.getPropertyValue('--waypoint-start').trim() || '#34D399');
+  const b = hexToRgb(styles.getPropertyValue('--waypoint-end').trim()   || '#A855F7');
+  const t = total <= 0 ? 0 : Math.max(0, Math.min(1, pos / total));
+  return rgbToHex(
+    Math.round(a.r + (b.r - a.r) * t),
+    Math.round(a.g + (b.g - a.g) * t),
+    Math.round(a.b + (b.b - a.b) * t),
+  );
+}
+function hexToRgb(hex) {
+  const m = String(hex).trim().match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!m) return { r: 0, g: 0, b: 0 };
+  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+}
+function rgbToHex(r, g, b) {
+  const h = n => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0');
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+
 function renderStops() {
   const list = $('stopsList');
   if (!list) return;
@@ -923,8 +1020,10 @@ function renderStops() {
   map.stops.forEach((stop, idx) => {
     const div = document.createElement('div');
     div.className = 'waypoint';
+    // idx+1 within (stops.length+1) segments, where 0=A and stops.length+1=B
+    const stopColor = waypointGradientColor(idx + 1, map.stops.length + 1);
     div.innerHTML = `
-      <span class="wp-marker wp-marker-stop" title="Stop ${idx + 1}">${idx + 1}</span>
+      <span class="wp-marker wp-marker-stop" title="Stop ${idx + 1}" style="border-color:${stopColor};color:${stopColor}">${idx + 1}</span>
       <div class="field autocomplete-wrap wp-input-wrap">
         <input type="text" class="input stop-input" placeholder="Stop ${idx + 1}" autocomplete="off" spellcheck="false">
         <div class="autocomplete-dropdown" hidden></div>
@@ -967,6 +1066,103 @@ function renderVehicleMode() {
   if (document.activeElement !== inp) {
     inp.value = state.customEff ? String(state.customEff) : '';
   }
+  renderSavedVehicles();
+}
+
+/* =========================
+   SAVED VEHICLES
+   ========================= */
+const SAVED_VEHICLES_CAP = 6;
+
+// Re-render the Quick-select chip row from state.savedVehicles. Hides the
+// whole row when the user has nothing saved yet, so the picker doesn't waste
+// vertical space with an empty placeholder.
+function renderSavedVehicles() {
+  const row = $('savedCarsRow');
+  const list = $('savedCarsList');
+  const saveBtn = $('saveCarBtn');
+  if (!row || !list) return;
+
+  const vehicles = Array.isArray(state.savedVehicles) ? state.savedVehicles : [];
+  if (vehicles.length === 0) {
+    row.hidden = true;
+    list.innerHTML = '';
+  } else {
+    row.hidden = false;
+    list.innerHTML = vehicles.map(v => {
+      const isActive = state.pickedVehicle?.id === v.id;
+      return `
+        <div class="saved-car-chip${isActive ? ' active' : ''}">
+          <button type="button" class="saved-car-load" data-id="${escapeHtml(String(v.id))}" title="Load this car">
+            <span class="saved-car-yr">${escapeHtml(String(v.year ?? ''))}</span>
+            <span class="saved-car-name">${escapeHtml(String(v.make ?? ''))} ${escapeHtml(String(v.model ?? ''))}</span>
+          </button>
+          <button type="button" class="saved-car-remove" data-id="${escapeHtml(String(v.id))}" title="Remove from quick-select" aria-label="Remove">×</button>
+        </div>
+      `;
+    }).join('');
+    list.querySelectorAll('.saved-car-load').forEach(btn => {
+      btn.addEventListener('click', () => loadSavedVehicle(btn.dataset.id));
+    });
+    list.querySelectorAll('.saved-car-remove').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        removeSavedVehicle(btn.dataset.id);
+      });
+    });
+  }
+
+  // Save button enabled only when a vehicle is loaded that isn't already saved.
+  if (saveBtn) {
+    const v = state.pickedVehicle;
+    const alreadySaved = !!(v?.id && vehicles.some(s => String(s.id) === String(v.id)));
+    saveBtn.disabled = !v?.id || alreadySaved;
+    saveBtn.title = !v?.id
+      ? 'Pick a complete car first (year + make + model + trim)'
+      : alreadySaved
+        ? 'Already in your quick-select list'
+        : 'Save the currently selected car for one-tap selection later';
+  }
+}
+
+function saveCurrentVehicle() {
+  const v = state.pickedVehicle;
+  if (!v?.id) { showToast('Pick a complete car first', 'error'); return; }
+  const list = state.savedVehicles || [];
+  if (list.some(s => String(s.id) === String(v.id))) {
+    showToast('Already saved'); return;
+  }
+  // Newest first so users see their latest pick at the top of the row.
+  state.savedVehicles = [{ ...v }, ...list].slice(0, SAVED_VEHICLES_CAP);
+  saveState();
+  renderSavedVehicles();
+  showToast(`Saved ${v.year} ${v.make} ${v.model}`);
+}
+
+function removeSavedVehicle(id) {
+  state.savedVehicles = (state.savedVehicles || []).filter(s => String(s.id) !== String(id));
+  saveState();
+  renderSavedVehicles();
+}
+
+// Load a saved vehicle as the active pick. Bumps it to the front of the list
+// (LRU) so frequently-used cars stay visible in the quick-select row.
+function loadSavedVehicle(id) {
+  const v = (state.savedVehicles || []).find(s => String(s.id) === String(id));
+  if (!v) return;
+  state.pickedVehicle = { ...v };
+  state.vehicleMode = 'pick';
+  state.savedVehicles = [v, ...state.savedVehicles.filter(s => String(s.id) !== String(id))];
+  // Auto-fill tank size from the loaded car's class.
+  const litres = estimateTankLitres(v.vClass);
+  if (litres > 0) {
+    const us = UNIT_SYSTEMS[state.unitSystem];
+    state.tankSize = parseFloat(fromLitre(litres, us.volume).toFixed(1));
+  }
+  saveState();
+  render();
+  update();
+  showToast(`Loaded ${v.year} ${v.make} ${v.model}`);
 }
 
 function renderPresets() {
@@ -1040,14 +1236,16 @@ function renderGasPrice() {
    PRICE HISTORY CHART
    ========================= */
 // Range filter buttons shown above the chart. Days = how far back to keep points;
-// null means everything we have. Default '6m' is the most informative view given
-// HISTORY_CAP = 26 weekly entries (~6 months).
+// null means everything we have. titleLabel is shown on the chart header so it
+// reflects the user's selection rather than just the count of points returned.
+// HISTORY_CAP=26 means 6m, 1y, and All often surface the same window of data —
+// the chart header says so explicitly when that happens.
 const CHART_RANGES = {
-  '1w':  { days: 7,    label: '1W' },
-  '1m':  { days: 31,   label: '1M' },
-  '6m':  { days: 186,  label: '6M' },
-  '1y':  { days: 365,  label: '1Y' },
-  'all': { days: null, label: 'All' },
+  '1w':  { days: 7,    label: '1W',  titleLabel: 'past 1 week' },
+  '1m':  { days: 31,   label: '1M',  titleLabel: 'past 1 month' },
+  '6m':  { days: 186,  label: '6M',  titleLabel: 'past 6 months' },
+  '1y':  { days: 365,  label: '1Y',  titleLabel: 'past 1 year' },
+  'all': { days: null, label: 'All', titleLabel: 'full history' },
 };
 const MONTH_NAMES_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -1090,10 +1288,10 @@ function renderPriceChart() {
   if (n < 3) {
     host.innerHTML = `
       <div class="chart-header">
-        <span class="chart-title">${escapeHtml(def.label)}</span>
+        <span class="chart-title">${escapeHtml(def.label)} · ${escapeHtml(range.titleLabel)}</span>
       </div>
       ${tabsHtml}
-      <p class="chart-empty">Not enough data points in this window yet — try a longer range.</p>
+      <p class="chart-empty">Only ${n} data point${n === 1 ? '' : 's'} in this window — try a longer range.</p>
     `;
     bindChartRangeHandlers(host);
     return;
@@ -1195,9 +1393,18 @@ function renderPriceChart() {
     ? 'Flat trend'
     : `${deltaPct > 0 ? '+' : ''}${deltaPct.toFixed(1)}% in 4w (trend)`;
 
+  // Title says what the user picked (range.titleLabel) plus how many actual data
+  // points are visible. Adds a "less data available" note when the requested
+  // window is larger than our history (e.g. 1Y view but we only have 5 months).
+  const truncatedNote = (range.days && allPoints.length > 0
+    && allPoints[0].ts > lastTs - range.days * 86400000)
+    ? ' · (less data available than the range)'
+    : '';
+  const titleSpan = `${range.titleLabel} · ${n} pts${truncatedNote}`;
+
   host.innerHTML = `
     <div class="chart-header">
-      <span class="chart-title">${escapeHtml(def.label)} · last ${n} weeks</span>
+      <span class="chart-title">${escapeHtml(def.label)} · ${escapeHtml(titleSpan)}</span>
       <span class="chart-trend chart-trend-${trendDir}">${trendArrow} ${escapeHtml(trendText)}</span>
     </div>
     ${tabsHtml}
@@ -1367,6 +1574,21 @@ function renderResults() {
     flash('resAdjusted', `${fmtNumber(fromL100km(r.adjL, us.efficiency), 1)} ${us.effLabel}`);
   } else {
     $('resAdjustedRow').hidden = true;
+  }
+
+  // Weather (from Open-Meteo at active route's midpoint)
+  if (state.routeWeather && isFinite(state.routeWeather.tempC)) {
+    const w = state.routeWeather;
+    const [emoji, label] = describeWeatherCode(w.weatherCode);
+    const wm = weatherFuelMultiplier(w);
+    const pct = Math.round((wm - 1) * 100);
+    const pctText = pct > 0 ? ` · +${pct}% fuel` : '';
+    $('resWeatherRow').hidden = false;
+    flash('resWeather',
+      `${emoji} ${Math.round(w.tempC)}°C, ${label}${pctText}`
+    );
+  } else {
+    $('resWeatherRow').hidden = true;
   }
 
   // Fuel needed
@@ -1652,6 +1874,7 @@ function attachListeners() {
   // VIN lookup
   $('vinLookupBtn').addEventListener('click', () => openModal('vinModal'));
   $('vinDecodeBtn').addEventListener('click', handleVinDecode);
+  $('saveCarBtn').addEventListener('click', saveCurrentVehicle);
   $('vinInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); handleVinDecode(); }
   });
@@ -1685,21 +1908,12 @@ function attachListeners() {
     });
   });
 
-  // Avoid checkboxes — re-pick active route or re-render labels
-  $('avoidHighways').addEventListener('change', () => {
-    if (map.routes.length > 0) {
-      // Re-pick active route based on new preference (no re-fetch needed)
-      selectRoute(pickActiveRouteIdx());
-    }
-  });
-  ['avoidTolls', 'avoidFerries'].forEach(id => {
+  // Avoid checkboxes — re-fetch routes so the new avoid_features actually take
+  // effect via ORS. Old code only refreshed the hint text or re-picked between
+  // already-loaded OSRM alternatives, which silently ignored the user.
+  ['avoidHighways', 'avoidTolls', 'avoidFerries', 'stayInCountry'].forEach(id => {
     $(id).addEventListener('change', () => {
-      // No filtering possible — just refresh hint text
-      if (map.routes.length > 0) {
-        const hint = $('distLookupHint');
-        hint.style.color = 'var(--text-fade)';
-        hint.textContent = `${map.routes.length} route${map.routes.length > 1 ? 's' : ''} loaded.${avoidNoteSuffix()}`;
-      }
+      if (map.origin && map.dest) handleDistanceLookup();
     });
   });
 
@@ -1970,7 +2184,9 @@ const map = {
   clickMode: false,    // when true, clicking the map adds a stop
 };
 
-const ROUTE_COLORS = ['#F59E0B', '#22C55E', '#60A5FA'];
+// Route polyline colors — the "active" highlight uses the accent (purple),
+// alternates differentiate by hue without using orange.
+const ROUTE_COLORS = ['#A855F7', '#22C55E', '#60A5FA'];
 const ROUTE_NAMES = ['Fastest', 'Alternative', 'Scenic'];
 // OSRM's default car profile uses conservative free-flow speeds and undershoots real-world ETAs by ~22%.
 // Empirical correction so durations match traffic-aware estimates (Google Maps).
@@ -2060,9 +2276,11 @@ function applyMapTiles() {
   if (!map.instance) return;
   if (map.tileLayer) map.instance.removeLayer(map.tileLayer);
   const dark = state.theme !== 'light';
+  // CartoDB serves dark_all at the root but voyager lives under rastertiles/voyager.
+  // The old light URL silently 404'd, leaving the map blank in bright mode.
   const url = dark
     ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png';
+    : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
   map.tileLayer = L.tileLayer(url, {
     maxZoom: 19,
     attribution: '© OpenStreetMap, © CARTO',
@@ -2142,28 +2360,42 @@ async function routeViaORS(waypoints, avoidFeatures, opts = {}) {
     options: orsOptions,
   };
 
-  // Run both preferences in parallel. Each may individually error (e.g. when
-  // avoid_borders=controlled rules out one routing strategy), so we settle and
-  // pull whatever did succeed.
-  const [fastResult, shortResult] = await Promise.allSettled([
+  // Three preferences in parallel: fastest (least time), shortest (least
+  // distance, used as our "most fuel efficient" proxy), and recommended (ORS's
+  // balanced default). Each may individually error (e.g. avoid_borders rules
+  // out one strategy), so we settle and keep whatever did succeed.
+  // Note we don't fetch real-time traffic / road closures — those need a paid
+  // routing service (HERE, TomTom, Google Maps). The 3 variants here come from
+  // ORS's static cost model on top of OpenStreetMap data.
+  const [fastResult, shortResult, recResult] = await Promise.allSettled([
     orsRequest(url, { ...baseBody, preference: 'fastest' }),
     orsRequest(url, { ...baseBody, preference: 'shortest' }),
+    orsRequest(url, { ...baseBody, preference: 'recommended' }),
   ]);
 
-  const fastFeat  = fastResult.status === 'fulfilled' ? fastResult.value.features?.[0] : null;
-  const shortFeat = shortResult.status === 'fulfilled' ? shortResult.value.features?.[0] : null;
+  const pick = res => res.status === 'fulfilled' ? res.value.features?.[0] : null;
+  const fastFeat = pick(fastResult);
+  const shortFeat = pick(shortResult);
+  const recFeat = pick(recResult);
 
-  if (!fastFeat && !shortFeat) {
-    // Surface whichever error we got — usually the same explanation for both.
-    const err = (fastResult.status === 'rejected' ? fastResult.reason : shortResult.reason);
+  if (!fastFeat && !shortFeat && !recFeat) {
+    const err = [fastResult, shortResult, recResult]
+      .find(r => r.status === 'rejected')?.reason;
     throw err || new Error('No drivable route found');
   }
 
+  // Dedupe: keep fastest first, drop subsequent routes that overlap it within
+  // 0.5% distance. That collapses cases where a region has only one realistic
+  // path and all three preferences converge.
   const features = [];
-  if (fastFeat) features.push(fastFeat);
-  if (shortFeat && (!fastFeat || !sameORSRoute(fastFeat, shortFeat))) {
-    features.push(shortFeat);
-  }
+  const tryAdd = feat => {
+    if (!feat) return;
+    if (features.some(f => sameORSRoute(f, feat))) return;
+    features.push(feat);
+  };
+  tryAdd(fastFeat);
+  tryAdd(shortFeat);
+  tryAdd(recFeat);
 
   return { routes: features.map(parseORSFeature) };
 }
@@ -2395,14 +2627,16 @@ function labelRoutes(routes) {
 
     // Highlight the "less highway" alt when user wants to avoid highways
     if (avoidHwy && routes.length > 1 && isSlowest && !isFast) {
-      return { label: 'Less highway', color: '#A78BFA', key: 'lowhwy' };
+      return { label: 'Less highway', color: '#F472B6', key: 'lowhwy' };
     }
     if (isFast && isShort && routes.length > 1) {
-      return { label: 'Fastest & most efficient', color: '#F59E0B', key: 'both' };
+      return { label: 'Fastest & most efficient', color: '#A855F7', key: 'both' };
     }
-    if (isFast) return { label: 'Fastest', color: '#F59E0B', key: 'fast' };
-    if (isShort) return { label: 'Most fuel efficient', color: '#22C55E', key: 'efficient' };
-    return { label: 'Alternative', color: '#60A5FA', key: 'alt' };
+    if (isFast)  return { label: 'Fastest',           color: '#A855F7', key: 'fast' };
+    if (isShort) return { label: 'Most fuel efficient', color: '#14B8A6', key: 'efficient' };
+    // ORS's "recommended" preference call lands here when it's neither the
+    // shortest nor the fastest — a balanced pick avoiding the most stressful roads.
+    return { label: 'Balanced', color: '#60A5FA', key: 'balanced' };
   });
 }
 
@@ -2469,11 +2703,21 @@ function plotRoutes() {
   map.endMarker = L.marker([map.dest.lat, map.dest.lon], { icon: endIcon })
     .bindPopup(`<strong>End</strong><br>${escapeHtml(map.dest.label)}`).addTo(m);
 
-  // Stop waypoint markers
+  // Stop waypoint markers — color interpolates between start (A) and end (B)
+  // so a chain of stops reads as "ramp from A's color to B's color."
   map.stops.forEach((s, i) => {
     if (s.lat == null || s.lon == null) return;
-    const icon = L.divIcon({ className: 'map-pin map-pin-stop', html: String(i + 1), iconSize: [26, 26] });
-    const m2 = L.marker([s.lat, s.lon], { icon })
+    const color = waypointGradientColor(i + 1, map.stops.length + 1);
+    const icon = L.divIcon({
+      className: 'map-pin map-pin-stop',
+      html: `<span style="color:${color}">${i + 1}</span>`,
+      iconSize: [26, 26],
+    });
+    icon.options.html = `<span>${i + 1}</span>`;
+    // Inline color via a wrapper element so currentColor in the CSS picks it up
+    const iconHtml = `<div style="color:${color};display:grid;place-items:center;width:100%;height:100%;font-weight:700;font-family:var(--font-mono);font-size:11px;box-shadow:0 2px 8px ${color}55;border-radius:50%;background:var(--bg-elev);border:2px solid ${color};">${i + 1}</div>`;
+    const stopIcon = L.divIcon({ className: 'map-pin-stop-wrap', html: iconHtml, iconSize: [26, 26], iconAnchor: [13, 13] });
+    const m2 = L.marker([s.lat, s.lon], { icon: stopIcon })
       .bindPopup(`<strong>Stop ${i + 1}</strong><br>${escapeHtml(s.label || '')}`).addTo(m);
     map.stopMarkers.push(m2);
   });
@@ -2508,7 +2752,7 @@ function renderRouteAlts() {
   const wrap = $('routeAlts');
   if (!map.routes.length) { wrap.hidden = true; return; }
   wrap.hidden = false;
-  wrap.innerHTML = '<h3 class="route-alts-title">Pick a route <small style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--text-fade)"> · fastest and most-efficient may differ — pick what matters for your trip</small></h3>';
+  wrap.innerHTML = '<h3 class="route-alts-title">Pick a route <small style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--text-fade)" title="Live traffic and real-time road-closure data require a paid routing service (HERE / TomTom / Google). The variants below come from the static OSM road network."> · fastest, balanced, and most-efficient — based on the static road network (no live closures)</small></h3>';
   const us = UNIT_SYSTEMS[state.unitSystem];
   const labels = labelRoutes(map.routes);
   map.routes.forEach((r, i) => {
@@ -2576,8 +2820,28 @@ function selectRoute(idx) {
     ? `${cnt} fuel stations · ${fmtNumber(km, 1)} km active route`
     : `${fmtNumber(km, 1)} km active route`;
 
+  // Update active-route weather. Cached on the route the first time so route
+  // switching is instant after that.
+  applyRouteWeather(idx);
+
   // Kick off (or refresh from cache) the toll/ferry estimate for this route.
   applyTollFerryEstimate(idx);
+}
+
+// Compute (or pull cached) weather at the route midpoint and apply it. Causes
+// the cost calculation to refresh — fetch failures silently keep the existing
+// reading, so a network blip doesn't blank the column.
+async function applyRouteWeather(idx) {
+  const route = map.routes[idx];
+  if (!route) return;
+  if (route.weather === undefined) {
+    route.weather = null; // mark as "in flight" so we don't refetch
+    const w = await fetchRouteWeather(route);
+    route.weather = w;
+  }
+  if (idx !== map.activeRoute) return;
+  state.routeWeather = route.weather;
+  update();
 }
 
 // Compute, cache, and apply a toll/ferry estimate for a route. If the user has

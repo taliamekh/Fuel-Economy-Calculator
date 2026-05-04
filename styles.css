@@ -9,18 +9,22 @@
   --text: #ECECF1;
   --text-dim: #9A9AA8;
   --text-fade: #6A6A78;
-  --accent: #F59E0B;
-  --accent-2: #FBBF24;
-  --accent-3: #FB923C;
-  --accent-soft: rgba(245, 158, 11, 0.12);
-  --accent-glow: rgba(245, 158, 11, 0.35);
+  --accent: #A855F7;
+  --accent-2: #C084FC;
+  --accent-3: #7C3AED;
+  --accent-soft: rgba(168, 85, 247, 0.14);
+  --accent-glow: rgba(168, 85, 247, 0.40);
   --green: #34D399;
   --green-soft: rgba(52, 211, 153, 0.12);
   --red: #F87171;
   --red-soft: rgba(248, 113, 113, 0.12);
+  /* Semantic waypoint endpoints — start (A) is green, end (B) is the accent.
+     Stops are colored along the gradient between them in JS. */
+  --waypoint-start: #34D399;
+  --waypoint-end:   #A855F7;
   --shadow: 0 1px 0 rgba(255,255,255,0.04), 0 12px 30px rgba(0,0,0,0.45);
   --shadow-hover: 0 1px 0 rgba(255,255,255,0.06), 0 18px 40px rgba(0,0,0,0.55);
-  --shadow-hero: 0 1px 0 rgba(255,255,255,0.06), 0 30px 60px rgba(0,0,0,0.5), 0 0 80px rgba(245,158,11,0.08);
+  --shadow-hero: 0 1px 0 rgba(255,255,255,0.06), 0 30px 60px rgba(0,0,0,0.5), 0 0 80px rgba(168,85,247,0.10);
   --radius: 16px;
   --radius-sm: 10px;
   --font-sans: 'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -38,18 +42,20 @@
   --text: #14151A;
   --text-dim: #555A65;
   --text-fade: #8A8E97;
-  --accent: #B45309;
-  --accent-2: #C2410C;
-  --accent-3: #D97706;
-  --accent-soft: rgba(180, 83, 9, 0.10);
-  --accent-glow: rgba(180, 83, 9, 0.25);
+  --accent: #7C3AED;
+  --accent-2: #8B5CF6;
+  --accent-3: #6D28D9;
+  --accent-soft: rgba(124, 58, 237, 0.10);
+  --accent-glow: rgba(124, 58, 237, 0.28);
   --green: #16A34A;
   --green-soft: rgba(22, 163, 74, 0.10);
   --red: #DC2626;
   --red-soft: rgba(220, 38, 38, 0.10);
+  --waypoint-start: #16A34A;
+  --waypoint-end:   #7C3AED;
   --shadow: 0 1px 0 rgba(0,0,0,0.02), 0 6px 18px rgba(0,0,0,0.06);
   --shadow-hover: 0 1px 0 rgba(0,0,0,0.03), 0 12px 28px rgba(0,0,0,0.10);
-  --shadow-hero: 0 1px 0 rgba(0,0,0,0.03), 0 14px 30px rgba(0,0,0,0.08), 0 0 80px rgba(180,83,9,0.06);
+  --shadow-hero: 0 1px 0 rgba(0,0,0,0.03), 0 14px 30px rgba(0,0,0,0.08), 0 0 80px rgba(124,58,237,0.08);
 }
 
 /* ============ GLOBAL ============ */
@@ -77,7 +83,7 @@ body::before {
   background:
     radial-gradient(900px 500px at 85% -5%, var(--accent-soft) 0%, transparent 50%),
     radial-gradient(700px 450px at -5% 105%, var(--green-soft) 0%, transparent 55%),
-    radial-gradient(500px 300px at 50% 50%, rgba(251,146,60,0.04) 0%, transparent 70%);
+    radial-gradient(500px 300px at 50% 50%, rgba(168, 85, 247, 0.04) 0%, transparent 70%);
 }
 
 [hidden] { display: none !important; }
@@ -618,7 +624,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.015em; }
 /* ============ RESULTS — HERO ============ */
 .results-card {
   background:
-    linear-gradient(180deg, rgba(245, 158, 11, 0.04) 0%, transparent 30%),
+    linear-gradient(180deg, var(--accent-soft) 0%, transparent 30%),
     var(--bg-elev);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -1268,11 +1274,11 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.015em; }
   align-self: center;
   user-select: none;
 }
-.wp-marker-start { border-color: var(--green); color: var(--green); box-shadow: 0 0 0 2px var(--bg-elev-2); }
-.wp-marker-end { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 2px var(--bg-elev-2); }
+.wp-marker-start { border-color: var(--waypoint-start); color: var(--waypoint-start); box-shadow: 0 0 0 2px var(--bg-elev-2); }
+.wp-marker-end { border-color: var(--waypoint-end); color: var(--waypoint-end); box-shadow: 0 0 0 2px var(--bg-elev-2); }
 .wp-marker-stop {
-  border-color: var(--accent-3);
-  color: var(--accent-3);
+  /* Stops get inline color set per-instance from JS so the dot index
+     interpolates smoothly between waypoint-start and waypoint-end. */
   font-size: 11px;
   box-shadow: 0 0 0 2px var(--bg-elev-2);
 }
@@ -1568,12 +1574,12 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.015em; }
   width: 28px !important; height: 28px !important;
   margin-left: -14px !important; margin-top: -14px !important;
 }
-.map-pin-start { border: 2px solid var(--green); color: var(--green); box-shadow: 0 2px 8px rgba(34,197,94,0.5); }
-.map-pin-end { border: 2px solid var(--accent); color: var(--accent); box-shadow: 0 2px 8px var(--accent-glow); }
+.map-pin-start { border: 2px solid var(--waypoint-start); color: var(--waypoint-start); box-shadow: 0 2px 8px rgba(52, 211, 153, 0.5); }
+.map-pin-end { border: 2px solid var(--waypoint-end); color: var(--waypoint-end); box-shadow: 0 2px 8px var(--accent-glow); }
 .map-pin-stop {
-  border: 2px solid var(--accent-3);
-  color: var(--accent-3);
-  box-shadow: 0 2px 8px rgba(251, 146, 60, 0.5);
+  /* Per-stop color gradient is applied inline via the divIcon HTML in plotRoutes;
+     the static styling here is just shape and size. */
+  border: 2px solid currentColor;
   width: 26px !important; height: 26px !important;
   margin-left: -13px !important; margin-top: -13px !important;
   font-size: 11px;
@@ -1962,3 +1968,50 @@ h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.015em; }
 }
 [data-theme="light"] .chip-btn.chip-btn-danger { color: #b91c1c; }
 [data-theme="light"] .chip-btn.chip-btn-danger:hover { color: #991b1b; }
+
+/* ============== Saved-vehicles quick-select ============== */
+.saved-cars-row {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 14px;
+}
+.saved-cars-row[hidden] { display: none; }
+.saved-cars-list {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.saved-car-chip {
+  display: inline-flex; align-items: stretch;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  overflow: hidden;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.saved-car-chip:hover { border-color: var(--accent); }
+.saved-car-chip.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.saved-car-load {
+  appearance: none; -webkit-appearance: none;
+  background: transparent; border: none; color: var(--text);
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px; font-weight: 500;
+  cursor: pointer;
+}
+.saved-car-load .saved-car-yr {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 11px;
+}
+.saved-car-remove {
+  appearance: none; -webkit-appearance: none;
+  background: transparent; border: none;
+  border-left: 1px solid var(--border);
+  color: var(--text-fade); cursor: pointer;
+  width: 26px; padding: 0;
+  font-size: 14px; line-height: 1;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+.saved-car-remove:hover { color: var(--red); background: var(--red-soft); }

@@ -161,6 +161,10 @@
 
       <!-- Pick mode -->
       <div class="vehicle-pick" id="pickPanel">
+        <div class="saved-cars-row" id="savedCarsRow" hidden>
+          <span class="field-label">Quick select</span>
+          <div class="saved-cars-list" id="savedCarsList"></div>
+        </div>
         <div class="row wrap">
           <div class="field grow">
             <span class="field-label">Year</span>
@@ -184,6 +188,9 @@
         <div class="helper-row">
           <button type="button" class="chip-btn" id="vinLookupBtn">
             <span class="chip-icon">🔍</span>Look up by VIN
+          </button>
+          <button type="button" class="chip-btn" id="saveCarBtn" disabled title="Save the currently selected car for one-tap selection later">
+            <span class="chip-icon">⭐</span>Save this car
           </button>
           <span class="hint" style="margin: 7px 0 0;">Don't know the trim? Decode your VIN.</span>
         </div>
@@ -400,6 +407,10 @@
         <div class="result-row" id="resAdjustedRow" hidden>
           <span class="result-key">Adjusted</span>
           <span class="result-val num" id="resAdjusted">—</span>
+        </div>
+        <div class="result-row" id="resWeatherRow" hidden>
+          <span class="result-key">Weather <small style="font-weight:400;color:var(--text-fade)">at midroute</small></span>
+          <span class="result-val" id="resWeather">—</span>
         </div>
         <div class="result-row">
           <span class="result-key">Fuel needed</span>
