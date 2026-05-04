@@ -2089,13 +2089,17 @@ function clearMapLayers() {
   clearStationLayer();
 }
 
-// Read the current state of the three avoid checkboxes and return ORS feature names.
+// Read the current state of the avoid checkboxes. Returns the ORS feature names
+// for avoid_features plus a stayInCountry flag (mapped to ORS avoid_borders).
 function collectAvoidFeatures() {
-  const out = [];
-  if ($('avoidHighways')?.checked) out.push('highways');
-  if ($('avoidTolls')?.checked)    out.push('tollways');
-  if ($('avoidFerries')?.checked)  out.push('ferries');
-  return out;
+  const features = [];
+  if ($('avoidHighways')?.checked) features.push('highways');
+  if ($('avoidTolls')?.checked)    features.push('tollways');
+  if ($('avoidFerries')?.checked)  features.push('ferries');
+  return {
+    features,
+    stayInCountry: !!$('stayInCountry')?.checked,
+  };
 }
 
 // OSRM: free, no auth, no avoid_features support. Used for "default" routing.
@@ -2111,24 +2115,60 @@ async function routeViaOSRM(waypoints, stopCount) {
   return data;
 }
 
-// OpenRouteService: requires API key, supports avoid_features, returns per-segment
-// toll/ferry markers via the `extras` field. We translate ORS's response shape
-// into the same { routes: [{distance, duration, geometry:{coordinates}, legs:[{steps}], extras }] }
-// shape OSRM produces, plus a flattened orsExtraDistances precomputed from extras.values
-// so the toll/ferry estimator can use them directly.
-async function routeViaORS(waypoints, avoidFeatures) {
-  // ORS announced a migration to api.heigit.org but as of 2026-05 the new
-  // subdomain rejects browser CORS preflights with 404 on OPTIONS. The original
-  // api.openrouteservice.org still works fine from browsers.
+// OpenRouteService: requires API key, supports avoid_features, avoid_borders
+// (stay-in-country), and explicit `preference` (fastest vs shortest). Per-segment
+// toll/ferry markers via the `extras` field are precomputed against the actual
+// driven polyline.
+//
+// We make TWO parallel calls — preference="fastest" and preference="shortest" —
+// so users always see distinct "Fastest" and "Most fuel efficient" options, even
+// when the optimal route happens to win on both axes. If both calls return the
+// same route (within tolerance), we dedupe and the labelling collapses to a
+// combined "Fastest & most efficient" card. Doubles the daily quota use, still
+// well inside the 2000/day free tier.
+//
+// ORS's deprecated api.heigit.org subdomain rejects browser CORS preflights as
+// of 2026-05; we stick with api.openrouteservice.org until that's resolved.
+async function routeViaORS(waypoints, avoidFeatures, opts = {}) {
   const url = 'https://api.openrouteservice.org/v2/directions/driving-car/geojson';
-  const body = {
+  const orsOptions = {};
+  if (avoidFeatures.length) orsOptions.avoid_features = avoidFeatures;
+  if (opts.stayInCountry)   orsOptions.avoid_borders = 'controlled';
+
+  const baseBody = {
     coordinates: waypoints.map(p => [p.lon, p.lat]),
     instructions: true,
     extra_info: ['tollways', 'waytype'],
-    options: avoidFeatures.length ? { avoid_features: avoidFeatures } : {},
-    // alternative_routes only allowed on 2-point queries in ORS too
-    ...(waypoints.length === 2 ? { alternative_routes: { target_count: 2, weight_factor: 1.4, share_factor: 0.6 } } : {}),
+    options: orsOptions,
   };
+
+  // Run both preferences in parallel. Each may individually error (e.g. when
+  // avoid_borders=controlled rules out one routing strategy), so we settle and
+  // pull whatever did succeed.
+  const [fastResult, shortResult] = await Promise.allSettled([
+    orsRequest(url, { ...baseBody, preference: 'fastest' }),
+    orsRequest(url, { ...baseBody, preference: 'shortest' }),
+  ]);
+
+  const fastFeat  = fastResult.status === 'fulfilled' ? fastResult.value.features?.[0] : null;
+  const shortFeat = shortResult.status === 'fulfilled' ? shortResult.value.features?.[0] : null;
+
+  if (!fastFeat && !shortFeat) {
+    // Surface whichever error we got — usually the same explanation for both.
+    const err = (fastResult.status === 'rejected' ? fastResult.reason : shortResult.reason);
+    throw err || new Error('No drivable route found');
+  }
+
+  const features = [];
+  if (fastFeat) features.push(fastFeat);
+  if (shortFeat && (!fastFeat || !sameORSRoute(fastFeat, shortFeat))) {
+    features.push(shortFeat);
+  }
+
+  return { routes: features.map(parseORSFeature) };
+}
+
+async function orsRequest(url, body) {
   const r = await fetch(url, {
     method: 'POST',
     headers: {
@@ -2138,35 +2178,45 @@ async function routeViaORS(waypoints, avoidFeatures) {
     body: JSON.stringify(body),
   });
   if (!r.ok) {
-    const err = await r.text().catch(() => '');
-    throw new Error(`ORS lookup failed (${r.status})${err ? `: ${err.slice(0, 200)}` : ''}`);
+    const text = await r.text().catch(() => '');
+    let detail = '';
+    try {
+      const j = JSON.parse(text);
+      detail = j?.error?.message || j?.error || '';
+    } catch {}
+    throw new Error(detail
+      ? `ORS: ${detail}`
+      : `ORS lookup failed (${r.status})${text ? `: ${text.slice(0, 160)}` : ''}`);
   }
-  const data = await r.json();
-  if (!data.features?.length) throw new Error('No drivable route found');
-  // ORS coordinates are already [lon, lat] in geometry; segments→legs with synthetic steps
-  // so existing leg/step consumers (the ferry detector) don't have to care which backend ran.
+  return r.json();
+}
+
+// Two ORS routes count as "the same" when they have effectively identical total
+// distance (within 0.5%). Used to collapse fastest+shortest into one card when
+// the optimal route wins on both axes.
+function sameORSRoute(a, b) {
+  const aDist = a.properties?.summary?.distance ?? 0;
+  const bDist = b.properties?.summary?.distance ?? 0;
+  if (aDist <= 0 || bDist <= 0) return false;
+  return Math.abs(aDist - bDist) / aDist < 0.005;
+}
+
+function parseORSFeature(feat) {
+  const segments = feat.properties?.segments || [];
+  const legs = segments.map(seg => ({
+    steps: (seg.steps || []).map(st => ({
+      mode: 'driving',
+      distance: st.distance,
+      duration: st.duration,
+    })),
+  }));
   return {
-    routes: data.features.map(feat => {
-      const segments = feat.properties?.segments || [];
-      const legs = segments.map(seg => ({
-        steps: (seg.steps || []).map(st => ({
-          mode: 'driving',
-          distance: st.distance,
-          duration: st.duration,
-        })),
-      }));
-      // Pre-compute toll/ferry meters from the extras + waytype tables. Cheaper to do
-      // it once here than to rebuild it every time the chart or summary re-renders.
-      const orsExtraDistances = computeORSExtraDistances(feat);
-      return {
-        distance: feat.properties?.summary?.distance ?? 0,
-        duration: feat.properties?.summary?.duration ?? 0,
-        geometry: feat.geometry,
-        legs,
-        extras: feat.properties?.extras || null,
-        orsExtraDistances,
-      };
-    }),
+    distance: feat.properties?.summary?.distance ?? 0,
+    duration: feat.properties?.summary?.duration ?? 0,
+    geometry: feat.geometry,
+    legs,
+    extras: feat.properties?.extras || null,
+    orsExtraDistances: computeORSExtraDistances(feat),
   };
 }
 
@@ -2246,11 +2296,14 @@ async function handleDistanceLookup() {
 
     hint.textContent = 'Computing routes…';
     const waypoints = [origin, ...stopsResolved, dest];
-    // ORS handles avoid_features; OSRM doesn't. Pick the right backend per request.
-    const avoidFeatures = collectAvoidFeatures();
-    const useORS = avoidFeatures.length > 0 && !!window.__ORS_API_KEY;
+    // ORS supports avoid_features, avoid_borders ("stay in country"), and explicit
+    // preference (fastest vs shortest). OSRM has none of those, but is free and
+    // unauthenticated. We use ORS whenever a key is present so the user always
+    // gets distinct fastest/most-efficient routes; falls back to OSRM otherwise.
+    const avoid = collectAvoidFeatures();
+    const useORS = !!window.__ORS_API_KEY;
     const data = useORS
-      ? await routeViaORS(waypoints, avoidFeatures)
+      ? await routeViaORS(waypoints, avoid.features, { stayInCountry: avoid.stayInCountry })
       : await routeViaOSRM(waypoints, stopsResolved.length);
     if (!data.routes?.length) throw new Error('No drivable route found');
 
@@ -2279,11 +2332,44 @@ async function handleDistanceLookup() {
     // Now load stations for the union of all routes
     loadStationsForAllRoutes();
   } catch (e) {
+    // Wipe any previous route state so the failure message isn't shown next to a
+    // visibly successful old route — the most common confused-state bug when you
+    // reroute, e.g. swapping the destination to a place across an ocean.
+    if (map.instance) {
+      clearRouteLayers();
+      if (map.startMarker) { map.instance.removeLayer(map.startMarker); map.startMarker = null; }
+      if (map.endMarker) { map.instance.removeLayer(map.endMarker); map.endMarker = null; }
+      for (const m of map.stopMarkers || []) map.instance.removeLayer(m);
+      map.stopMarkers = [];
+    }
+    map.routes = [];
+    map.activeRoute = 0;
+    renderRouteAlts();
     hint.style.color = 'var(--red)';
-    hint.textContent = `Couldn't compute: ${e.message}`;
+    hint.textContent = friendlyRouteError(e.message);
   } finally {
     btn.disabled = false;
   }
+}
+
+// Translate raw routing-engine errors into something a non-technical user
+// can act on. The main hostile case is "no drivable route" between places that
+// genuinely have no road link — typically separated by water.
+function friendlyRouteError(msg) {
+  const m = String(msg || '').toLowerCase();
+  // Match the major variants of "no route exists" across OSRM ("No drivable
+  // route") and ORS ("Route could not be found", "Unable to find a route").
+  if (m.includes('no drivable') || m.includes('no route') || m.includes('not found')
+      || m.includes('could not be found') || m.includes('unable to find')) {
+    return "No road connects these locations — they may be separated by water, or one of the addresses didn't resolve. Check each address, or remove an Avoid filter (especially Border crossings or Ferries).";
+  }
+  if (m.includes('couldn\'t locate') || m.includes('geocode')) {
+    return `${msg}. Try a more specific address — include city and country.`;
+  }
+  if (m.includes('ors')) {
+    return `Routing service: ${msg}`;
+  }
+  return `Couldn't compute: ${msg}`;
 }
 
 async function geocodeOne(q) {
@@ -2332,13 +2418,18 @@ function pickActiveRouteIdx() {
 }
 
 function avoidNoteSuffix() {
-  const highways = $('avoidHighways')?.checked;
-  const tolls    = $('avoidTolls')?.checked;
-  const ferries  = $('avoidFerries')?.checked;
-  if (!highways && !tolls && !ferries) return '';
-  const which = [highways && 'highways', tolls && 'tolls', ferries && 'ferries'].filter(Boolean).join(' & ');
-  // ORS is wired up — note only matters when its key is missing locally and we
-  // had to fall back to OSRM (which can't honour avoid_features).
+  const highways      = $('avoidHighways')?.checked;
+  const tolls         = $('avoidTolls')?.checked;
+  const ferries       = $('avoidFerries')?.checked;
+  const stayInCountry = $('stayInCountry')?.checked;
+  if (!highways && !tolls && !ferries && !stayInCountry) return '';
+  const parts = [
+    highways && 'highways',
+    tolls && 'tolls',
+    ferries && 'ferries',
+    stayInCountry && 'border crossings',
+  ].filter(Boolean);
+  const which = parts.join(' & ');
   if (!window.__ORS_API_KEY) {
     return ` Note: ${which} can't be filtered — ORS key not configured locally.`;
   }
