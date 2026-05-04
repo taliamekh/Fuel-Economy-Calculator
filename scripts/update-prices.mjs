@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const PRICES_PATH = resolve(HERE, '..', 'prices.json');
+const PRICES_PATH = resolve(HERE, '..', 'data', 'prices.json');
 const HISTORY_CAP = 26;
 
 const UA = 'Mozilla/5.0 (compatible; trip-fuel-cost-bot/1.0)';

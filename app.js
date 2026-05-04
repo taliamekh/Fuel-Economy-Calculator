@@ -581,12 +581,12 @@ function gasDefaultFor(country, region) {
   return GAS_DEFAULTS[country] || GAS_DEFAULTS.OTHER;
 }
 
-// Loads the daily-refreshed prices.json (when served over http/https) and overlays it on
-// GAS_DEFAULTS. If the fetch fails (offline, file:// origin, 404) we silently keep the
-// hardcoded fallback values — the app keeps working either way.
+// Loads the daily-refreshed data/prices.json (when served over http/https) and
+// overlays it on GAS_DEFAULTS. If the fetch fails (offline, file:// origin, 404)
+// we silently keep the hardcoded fallback values — the app keeps working either way.
 async function loadPrices() {
   try {
-    const res = await fetch('prices.json', { cache: 'no-store' });
+    const res = await fetch('data/prices.json', { cache: 'no-store' });
     if (!res.ok) return;
     const data = await res.json();
     const { _meta, ...prices } = data;
