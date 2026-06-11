@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "lastUpdated": "2026-06-10",
+    "lastUpdated": "2026-06-11",
     "note": "Regional gas-price averages, refreshed daily by scripts/update-prices.mjs (manual or via GitHub Actions). Each entry stores headline prices in the country's native unit ($/gallon US for the US, $/litre everywhere else) plus a recent-history array used for the on-page chart.",
     "sources": {
       "US": "https://www.eia.gov/petroleum/gasdiesel/",
@@ -62,16 +62,12 @@
     ]
   },
   "CA": {
-    "regular": 1.791,
-    "mid": 1.965,
-    "premium": 2.096,
-    "diesel": 1.892,
+    "regular": 1.78,
+    "mid": 1.953,
+    "premium": 2.083,
+    "diesel": 1.88,
     "label": "Canada avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.668
-      },
       {
         "date": "2024-07-02",
         "regular": 1.668
@@ -484,20 +480,20 @@
       {
         "date": "2026-06-09",
         "regular": 1.791
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.78
       }
     ]
   },
   "CA_AB": {
-    "regular": 1.616,
-    "mid": 1.782,
-    "premium": 1.914,
-    "diesel": 1.708,
+    "regular": 1.62,
+    "mid": 1.787,
+    "premium": 1.919,
+    "diesel": 1.713,
     "label": "Alberta avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.527
-      },
       {
         "date": "2024-07-02",
         "regular": 1.496
@@ -910,20 +906,20 @@
       {
         "date": "2026-06-09",
         "regular": 1.616
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.62
       }
     ]
   },
   "CA_BC": {
-    "regular": 2.113,
-    "mid": 2.287,
-    "premium": 2.419,
-    "diesel": 2.166,
+    "regular": 2.107,
+    "mid": 2.281,
+    "premium": 2.412,
+    "diesel": 2.16,
     "label": "BC avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.883
-      },
       {
         "date": "2024-07-02",
         "regular": 1.84
@@ -1336,20 +1332,20 @@
       {
         "date": "2026-06-09",
         "regular": 2.113
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 2.107
       }
     ]
   },
   "CA_MB": {
-    "regular": 1.578,
-    "mid": 1.737,
-    "premium": 1.868,
-    "diesel": 1.677,
+    "regular": 1.656,
+    "mid": 1.823,
+    "premium": 1.96,
+    "diesel": 1.76,
     "label": "Manitoba avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.367
-      },
       {
         "date": "2024-07-02",
         "regular": 1.366
@@ -1762,20 +1758,20 @@
       {
         "date": "2026-06-09",
         "regular": 1.578
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.656
       }
     ]
   },
   "CA_NB": {
-    "regular": 1.758,
-    "mid": 1.934,
-    "premium": 2.069,
-    "diesel": 1.861,
+    "regular": 1.75,
+    "mid": 1.925,
+    "premium": 2.06,
+    "diesel": 1.853,
     "label": "New Brunswick avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.666
-      },
       {
         "date": "2024-07-02",
         "regular": 1.688
@@ -2188,20 +2184,20 @@
       {
         "date": "2026-06-09",
         "regular": 1.758
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.75
       }
     ]
   },
   "CA_NL": {
-    "regular": 1.864,
-    "mid": 2.037,
-    "premium": 2.164,
-    "diesel": 1.963,
+    "regular": 1.863,
+    "mid": 2.036,
+    "premium": 2.163,
+    "diesel": 1.962,
     "label": "Newfoundland avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.77
-      },
       {
         "date": "2024-07-02",
         "regular": 1.794
@@ -2614,20 +2610,20 @@
       {
         "date": "2026-06-09",
         "regular": 1.864
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.863
       }
     ]
   },
   "CA_NS": {
-    "regular": 1.752,
-    "mid": 1.921,
-    "premium": 2.049,
-    "diesel": 1.852,
+    "regular": 1.731,
+    "mid": 1.898,
+    "premium": 2.024,
+    "diesel": 1.83,
     "label": "Nova Scotia avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.708
-      },
       {
         "date": "2024-07-02",
         "regular": 1.738
@@ -3040,20 +3036,20 @@
       {
         "date": "2026-06-09",
         "regular": 1.752
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.731
       }
     ]
   },
   "CA_NT": {
-    "regular": 1.845,
-    "mid": 2.007,
-    "premium": 2.127,
-    "diesel": 1.938,
+    "regular": 1.779,
+    "mid": 1.935,
+    "premium": 2.051,
+    "diesel": 1.869,
     "label": "NWT avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.623
-      },
       {
         "date": "2024-07-02",
         "regular": 1.627
@@ -3466,6 +3462,10 @@
       {
         "date": "2026-06-09",
         "regular": 1.845
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.779
       }
     ]
   },
@@ -3477,16 +3477,12 @@
     "label": "Nunavut avg"
   },
   "CA_ON": {
-    "regular": 1.741,
-    "mid": 1.903,
-    "premium": 2.032,
-    "diesel": 1.833,
+    "regular": 1.715,
+    "mid": 1.874,
+    "premium": 2.001,
+    "diesel": 1.805,
     "label": "Ontario avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.646
-      },
       {
         "date": "2024-07-02",
         "regular": 1.66
@@ -3899,20 +3895,20 @@
       {
         "date": "2026-06-09",
         "regular": 1.741
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.715
       }
     ]
   },
   "CA_PE": {
-    "regular": 1.856,
-    "mid": 2.031,
-    "premium": 2.165,
-    "diesel": 1.958,
+    "regular": 1.891,
+    "mid": 2.069,
+    "premium": 2.206,
+    "diesel": 1.995,
     "label": "PEI avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.721
-      },
       {
         "date": "2024-07-02",
         "regular": 1.744
@@ -4325,20 +4321,20 @@
       {
         "date": "2026-06-09",
         "regular": 1.856
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.891
       }
     ]
   },
   "CA_QC": {
-    "regular": 1.834,
-    "mid": 1.991,
-    "premium": 2.119,
-    "diesel": 1.918,
+    "regular": 1.813,
+    "mid": 1.968,
+    "premium": 2.095,
+    "diesel": 1.896,
     "label": "Quebec avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.698
-      },
       {
         "date": "2024-07-02",
         "regular": 1.73
@@ -4751,20 +4747,20 @@
       {
         "date": "2026-06-09",
         "regular": 1.834
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.813
       }
     ]
   },
   "CA_SK": {
-    "regular": 1.667,
-    "mid": 1.845,
-    "premium": 1.98,
-    "diesel": 1.772,
+    "regular": 1.664,
+    "mid": 1.842,
+    "premium": 1.976,
+    "diesel": 1.769,
     "label": "Saskatchewan avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.535
-      },
       {
         "date": "2024-07-02",
         "regular": 1.519
@@ -5177,20 +5173,20 @@
       {
         "date": "2026-06-09",
         "regular": 1.667
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.664
       }
     ]
   },
   "CA_YT": {
-    "regular": 2.029,
-    "mid": 2.207,
-    "premium": 2.342,
-    "diesel": 2.134,
+    "regular": 1.999,
+    "mid": 2.174,
+    "premium": 2.307,
+    "diesel": 2.102,
     "label": "Yukon avg",
     "history": [
-      {
-        "date": "2024-06-25",
-        "regular": 1.899
-      },
       {
         "date": "2024-07-02",
         "regular": 1.899
@@ -5603,6 +5599,10 @@
       {
         "date": "2026-06-09",
         "regular": 2.029
+      },
+      {
+        "date": "2026-06-16",
+        "regular": 1.999
       }
     ]
   },
