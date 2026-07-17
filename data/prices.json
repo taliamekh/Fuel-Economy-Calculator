@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "lastUpdated": "2026-07-16",
+    "lastUpdated": "2026-07-17",
     "note": "Regional gas-price averages, refreshed daily by scripts/update-prices.mjs (manual or via GitHub Actions). Each entry stores headline prices in the country's native unit ($/gallon US for the US, $/litre everywhere else) plus a recent-history array used for the on-page chart.",
     "sources": {
       "US": "https://www.eia.gov/petroleum/gasdiesel/",
@@ -87,10 +87,10 @@
     ]
   },
   "CA": {
-    "regular": 1.771,
-    "mid": 1.944,
-    "premium": 2.072,
-    "diesel": 1.87,
+    "regular": 1.788,
+    "mid": 1.963,
+    "premium": 2.092,
+    "diesel": 1.888,
     "label": "Canada avg",
     "history": [
       {
@@ -508,15 +508,15 @@
       },
       {
         "date": "2026-07-21",
-        "regular": 1.771
+        "regular": 1.788
       }
     ]
   },
   "CA_AB": {
-    "regular": 1.571,
-    "mid": 1.717,
-    "premium": 1.849,
-    "diesel": 1.65,
+    "regular": 1.628,
+    "mid": 1.779,
+    "premium": 1.916,
+    "diesel": 1.71,
     "label": "Alberta avg",
     "history": [
       {
@@ -934,15 +934,15 @@
       },
       {
         "date": "2026-07-21",
-        "regular": 1.571
+        "regular": 1.628
       }
     ]
   },
   "CA_BC": {
-    "regular": 1.977,
-    "mid": 2.142,
-    "premium": 2.263,
-    "diesel": 2.028,
+    "regular": 1.997,
+    "mid": 2.164,
+    "premium": 2.286,
+    "diesel": 2.049,
     "label": "BC avg",
     "history": [
       {
@@ -1360,15 +1360,15 @@
       },
       {
         "date": "2026-07-21",
-        "regular": 1.977
+        "regular": 1.997
       }
     ]
   },
   "CA_MB": {
-    "regular": 1.657,
-    "mid": 1.824,
-    "premium": 1.959,
-    "diesel": 1.759,
+    "regular": 1.675,
+    "mid": 1.844,
+    "premium": 1.98,
+    "diesel": 1.778,
     "label": "Manitoba avg",
     "history": [
       {
@@ -1786,7 +1786,7 @@
       },
       {
         "date": "2026-07-21",
-        "regular": 1.657
+        "regular": 1.675
       }
     ]
   },
@@ -2217,10 +2217,10 @@
     ]
   },
   "CA_NL": {
-    "regular": 1.936,
-    "mid": 2.116,
-    "premium": 2.248,
-    "diesel": 2.037,
+    "regular": 1.963,
+    "mid": 2.146,
+    "premium": 2.279,
+    "diesel": 2.065,
     "label": "Newfoundland avg",
     "history": [
       {
@@ -2638,7 +2638,7 @@
       },
       {
         "date": "2026-07-21",
-        "regular": 1.936
+        "regular": 1.963
       }
     ]
   },
@@ -3502,10 +3502,10 @@
     "label": "Nunavut avg"
   },
   "CA_ON": {
-    "regular": 1.727,
-    "mid": 1.88,
-    "premium": 2.007,
-    "diesel": 1.812,
+    "regular": 1.734,
+    "mid": 1.888,
+    "premium": 2.015,
+    "diesel": 1.819,
     "label": "Ontario avg",
     "history": [
       {
@@ -3923,15 +3923,15 @@
       },
       {
         "date": "2026-07-21",
-        "regular": 1.727
+        "regular": 1.734
       }
     ]
   },
   "CA_PE": {
-    "regular": 1.891,
-    "mid": 2.07,
-    "premium": 2.203,
-    "diesel": 1.994,
+    "regular": 1.893,
+    "mid": 2.072,
+    "premium": 2.205,
+    "diesel": 1.996,
     "label": "PEI avg",
     "history": [
       {
@@ -4349,15 +4349,15 @@
       },
       {
         "date": "2026-07-21",
-        "regular": 1.891
+        "regular": 1.893
       }
     ]
   },
   "CA_QC": {
-    "regular": 1.836,
-    "mid": 1.985,
-    "premium": 2.113,
-    "diesel": 1.911,
+    "regular": 1.838,
+    "mid": 1.987,
+    "premium": 2.115,
+    "diesel": 1.913,
     "label": "Quebec avg",
     "history": [
       {
@@ -4775,15 +4775,15 @@
       },
       {
         "date": "2026-07-21",
-        "regular": 1.836
+        "regular": 1.838
       }
     ]
   },
   "CA_SK": {
-    "regular": 1.69,
-    "mid": 1.871,
-    "premium": 2.006,
-    "diesel": 1.797,
+    "regular": 1.687,
+    "mid": 1.868,
+    "premium": 2.002,
+    "diesel": 1.794,
     "label": "Saskatchewan avg",
     "history": [
       {
@@ -5201,7 +5201,7 @@
       },
       {
         "date": "2026-07-21",
-        "regular": 1.69
+        "regular": 1.687
       }
     ]
   },
