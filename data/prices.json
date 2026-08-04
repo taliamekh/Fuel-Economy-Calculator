@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "lastUpdated": "2026-08-03",
+    "lastUpdated": "2026-08-04",
     "note": "Regional gas-price averages, refreshed daily by scripts/update-prices.mjs (manual or via GitHub Actions). Each entry stores headline prices in the country's native unit ($/gallon US for the US, $/litre everywhere else) plus a recent-history array used for the on-page chart.",
     "sources": {
       "US": "https://www.eia.gov/petroleum/gasdiesel/",
