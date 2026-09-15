@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "lastUpdated": "2026-09-14",
+    "lastUpdated": "2026-09-15",
     "note": "Regional gas-price averages, refreshed daily by scripts/update-prices.mjs (manual or via GitHub Actions). Each entry stores headline prices in the country's native unit ($/gallon US for the US, $/litre everywhere else) plus a recent-history array used for the on-page chart.",
     "sources": {
       "US": "https://www.eia.gov/petroleum/gasdiesel/",
@@ -8,10 +8,10 @@
     }
   },
   "US": {
-    "regular": 4.157,
-    "mid": 4.532,
-    "premium": 4.856,
-    "diesel": 5.967,
+    "regular": 4.319,
+    "mid": 4.709,
+    "premium": 5.045,
+    "diesel": 6.285,
     "label": "US national avg",
     "history": [
       {
@@ -123,14 +123,19 @@
         "date": "2026-09-07",
         "regular": 4.157,
         "diesel": 5.967
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.319,
+        "diesel": 6.285
       }
     ]
   },
   "CA": {
-    "regular": 1.866,
-    "mid": 2.048,
-    "premium": 2.185,
-    "diesel": 1.97,
+    "regular": 1.869,
+    "mid": 2.051,
+    "premium": 2.189,
+    "diesel": 1.973,
     "label": "Canada avg",
     "history": [
       {
@@ -548,15 +553,15 @@
       },
       {
         "date": "2026-09-15",
-        "regular": 1.866
+        "regular": 1.869
       }
     ]
   },
   "CA_AB": {
-    "regular": 1.615,
-    "mid": 1.748,
-    "premium": 1.883,
-    "diesel": 1.681,
+    "regular": 1.616,
+    "mid": 1.749,
+    "premium": 1.884,
+    "diesel": 1.682,
     "label": "Alberta avg",
     "history": [
       {
@@ -974,15 +979,15 @@
       },
       {
         "date": "2026-09-15",
-        "regular": 1.615
+        "regular": 1.616
       }
     ]
   },
   "CA_BC": {
-    "regular": 2.1,
-    "mid": 2.275,
-    "premium": 2.405,
-    "diesel": 2.155,
+    "regular": 2.092,
+    "mid": 2.266,
+    "premium": 2.396,
+    "diesel": 2.147,
     "label": "BC avg",
     "history": [
       {
@@ -1400,15 +1405,15 @@
       },
       {
         "date": "2026-09-15",
-        "regular": 2.1
+        "regular": 2.092
       }
     ]
   },
   "CA_MB": {
-    "regular": 1.655,
-    "mid": 1.823,
-    "premium": 1.957,
-    "diesel": 1.758,
+    "regular": 1.684,
+    "mid": 1.855,
+    "premium": 1.991,
+    "diesel": 1.789,
     "label": "Manitoba avg",
     "history": [
       {
@@ -1826,15 +1831,15 @@
       },
       {
         "date": "2026-09-15",
-        "regular": 1.655
+        "regular": 1.684
       }
     ]
   },
   "CA_NB": {
-    "regular": 1.894,
-    "mid": 2.085,
-    "premium": 2.231,
-    "diesel": 2.006,
+    "regular": 1.914,
+    "mid": 2.107,
+    "premium": 2.255,
+    "diesel": 2.027,
     "label": "New Brunswick avg",
     "history": [
       {
@@ -2252,15 +2257,15 @@
       },
       {
         "date": "2026-09-15",
-        "regular": 1.894
+        "regular": 1.914
       }
     ]
   },
   "CA_NL": {
-    "regular": 2.081,
-    "mid": 2.276,
-    "premium": 2.414,
-    "diesel": 2.188,
+    "regular": 2.098,
+    "mid": 2.295,
+    "premium": 2.434,
+    "diesel": 2.206,
     "label": "Newfoundland avg",
     "history": [
       {
@@ -2678,15 +2683,15 @@
       },
       {
         "date": "2026-09-15",
-        "regular": 2.081
+        "regular": 2.098
       }
     ]
   },
   "CA_NS": {
-    "regular": 1.917,
-    "mid": 2.101,
-    "premium": 2.242,
-    "diesel": 2.029,
+    "regular": 1.914,
+    "mid": 2.098,
+    "premium": 2.238,
+    "diesel": 2.026,
     "label": "Nova Scotia avg",
     "history": [
       {
@@ -3104,7 +3109,7 @@
       },
       {
         "date": "2026-09-15",
-        "regular": 1.917
+        "regular": 1.914
       }
     ]
   },
@@ -3542,10 +3547,10 @@
     "label": "Nunavut avg"
   },
   "CA_ON": {
-    "regular": 1.814,
-    "mid": 1.959,
-    "premium": 2.089,
-    "diesel": 1.886,
+    "regular": 1.813,
+    "mid": 1.958,
+    "premium": 2.088,
+    "diesel": 1.885,
     "label": "Ontario avg",
     "history": [
       {
@@ -3963,7 +3968,7 @@
       },
       {
         "date": "2026-09-15",
-        "regular": 1.814
+        "regular": 1.813
       }
     ]
   },
@@ -4394,10 +4399,10 @@
     ]
   },
   "CA_QC": {
-    "regular": 1.983,
-    "mid": 2.133,
-    "premium": 2.27,
-    "diesel": 2.055,
+    "regular": 1.982,
+    "mid": 2.132,
+    "premium": 2.269,
+    "diesel": 2.054,
     "label": "Quebec avg",
     "history": [
       {
@@ -4815,15 +4820,15 @@
       },
       {
         "date": "2026-09-15",
-        "regular": 1.983
+        "regular": 1.982
       }
     ]
   },
   "CA_SK": {
-    "regular": 1.631,
-    "mid": 1.806,
-    "premium": 1.938,
-    "diesel": 1.735,
+    "regular": 1.667,
+    "mid": 1.846,
+    "premium": 1.981,
+    "diesel": 1.773,
     "label": "Saskatchewan avg",
     "history": [
       {
@@ -5241,7 +5246,7 @@
       },
       {
         "date": "2026-09-15",
-        "regular": 1.631
+        "regular": 1.667
       }
     ]
   },
@@ -5855,10 +5860,10 @@
   },
   "US_PADD1": {
     "label": "US East Coast avg",
-    "regular": 4.031,
-    "mid": 4.393,
-    "premium": 4.711,
-    "diesel": 5.744,
+    "regular": 4.191,
+    "mid": 4.567,
+    "premium": 4.898,
+    "diesel": 6.158,
     "history": [
       {
         "date": "2026-04-13",
@@ -5969,15 +5974,20 @@
         "date": "2026-09-07",
         "regular": 4.031,
         "diesel": 5.744
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.191,
+        "diesel": 6.158
       }
     ]
   },
   "US_PADD1A": {
     "label": "US New England avg",
-    "regular": 4.189,
-    "mid": 4.565,
-    "premium": 4.897,
-    "diesel": 5.99,
+    "regular": 4.294,
+    "mid": 4.679,
+    "premium": 5.02,
+    "diesel": 6.202,
     "history": [
       {
         "date": "2026-04-13",
@@ -6088,15 +6098,20 @@
         "date": "2026-09-07",
         "regular": 4.189,
         "diesel": 5.99
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.294,
+        "diesel": 6.202
       }
     ]
   },
   "US_PADD1B": {
     "label": "US Central Atlantic avg",
-    "regular": 4.24,
-    "mid": 4.621,
-    "premium": 4.955,
-    "diesel": 6.051,
+    "regular": 4.387,
+    "mid": 4.781,
+    "premium": 5.127,
+    "diesel": 6.312,
     "history": [
       {
         "date": "2026-04-13",
@@ -6207,15 +6222,20 @@
         "date": "2026-09-07",
         "regular": 4.24,
         "diesel": 6.051
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.387,
+        "diesel": 6.312
       }
     ]
   },
   "US_PADD1C": {
     "label": "US Lower Atlantic avg",
-    "regular": 3.86,
-    "mid": 4.208,
-    "premium": 4.513,
-    "diesel": 5.605,
+    "regular": 4.041,
+    "mid": 4.405,
+    "premium": 4.725,
+    "diesel": 6.096,
     "history": [
       {
         "date": "2026-04-13",
@@ -6326,15 +6346,20 @@
         "date": "2026-09-07",
         "regular": 3.86,
         "diesel": 5.605
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.041,
+        "diesel": 6.096
       }
     ]
   },
   "US_PADD2": {
     "label": "US Midwest avg",
-    "regular": 3.894,
-    "mid": 4.245,
-    "premium": 4.55,
-    "diesel": 5.946,
+    "regular": 4.091,
+    "mid": 4.46,
+    "premium": 4.78,
+    "diesel": 6.25,
     "history": [
       {
         "date": "2026-04-13",
@@ -6445,15 +6470,20 @@
         "date": "2026-09-07",
         "regular": 3.894,
         "diesel": 5.946
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.091,
+        "diesel": 6.25
       }
     ]
   },
   "US_PADD3": {
     "label": "US Gulf Coast avg",
-    "regular": 3.685,
-    "mid": 4.016,
-    "premium": 4.307,
-    "diesel": 5.754,
+    "regular": 3.852,
+    "mid": 4.198,
+    "premium": 4.502,
+    "diesel": 6.027,
     "history": [
       {
         "date": "2026-04-13",
@@ -6564,15 +6594,20 @@
         "date": "2026-09-07",
         "regular": 3.685,
         "diesel": 5.754
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 3.852,
+        "diesel": 6.027
       }
     ]
   },
   "US_PADD4": {
     "label": "US Rockies avg",
-    "regular": 4.314,
-    "mid": 4.702,
-    "premium": 5.039,
-    "diesel": 5.805,
+    "regular": 4.438,
+    "mid": 4.837,
+    "premium": 5.184,
+    "diesel": 6.066,
     "history": [
       {
         "date": "2026-04-13",
@@ -6683,15 +6718,20 @@
         "date": "2026-09-07",
         "regular": 4.314,
         "diesel": 5.805
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.438,
+        "diesel": 6.066
       }
     ]
   },
   "US_PADD5": {
     "label": "US West Coast avg",
-    "regular": 5.362,
-    "mid": 5.844,
-    "premium": 6.265,
-    "diesel": 6.987,
+    "regular": 5.467,
+    "mid": 5.958,
+    "premium": 6.388,
+    "diesel": 7.25,
     "history": [
       {
         "date": "2026-04-13",
@@ -6802,15 +6842,20 @@
         "date": "2026-09-07",
         "regular": 5.362,
         "diesel": 6.987
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 5.467,
+        "diesel": 7.25
       }
     ]
   },
   "US_CA": {
     "label": "California avg",
-    "regular": 5.678,
-    "mid": 6.19,
-    "premium": 6.636,
-    "diesel": 7.764,
+    "regular": 5.827,
+    "mid": 6.352,
+    "premium": 6.81,
+    "diesel": 8.039,
     "history": [
       {
         "date": "2026-04-13",
@@ -6921,15 +6966,20 @@
         "date": "2026-09-07",
         "regular": 5.678,
         "diesel": 7.764
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 5.827,
+        "diesel": 8.039
       }
     ]
   },
   "US_CO": {
     "label": "Colorado avg",
-    "regular": 4.187,
-    "mid": 4.564,
-    "premium": 4.893,
-    "diesel": 5.493,
+    "regular": 4.23,
+    "mid": 4.611,
+    "premium": 4.943,
+    "diesel": 5.549,
     "history": [
       {
         "date": "2026-04-13",
@@ -7019,15 +7069,19 @@
       {
         "date": "2026-09-07",
         "regular": 4.187
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.23
       }
     ]
   },
   "US_FL": {
     "label": "Florida avg",
-    "regular": 3.86,
-    "mid": 4.21,
-    "premium": 4.512,
-    "diesel": 5.288,
+    "regular": 4.102,
+    "mid": 4.474,
+    "premium": 4.795,
+    "diesel": 5.62,
     "history": [
       {
         "date": "2026-04-13",
@@ -7117,15 +7171,19 @@
       {
         "date": "2026-09-07",
         "regular": 3.86
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.102
       }
     ]
   },
   "US_MA": {
     "label": "Massachusetts avg",
-    "regular": 4.16,
-    "mid": 4.536,
-    "premium": 4.862,
-    "diesel": 5.938,
+    "regular": 4.253,
+    "mid": 4.637,
+    "premium": 4.971,
+    "diesel": 6.071,
     "history": [
       {
         "date": "2026-04-13",
@@ -7215,15 +7273,19 @@
       {
         "date": "2026-09-07",
         "regular": 4.16
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.253
       }
     ]
   },
   "US_MN": {
     "label": "Minnesota avg",
-    "regular": 4.077,
-    "mid": 4.445,
-    "premium": 4.766,
-    "diesel": 5.387,
+    "regular": 4.223,
+    "mid": 4.604,
+    "premium": 4.937,
+    "diesel": 5.58,
     "history": [
       {
         "date": "2026-04-13",
@@ -7313,15 +7375,19 @@
       {
         "date": "2026-09-07",
         "regular": 4.077
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.223
       }
     ]
   },
   "US_NY": {
     "label": "New York avg",
-    "regular": 4.26,
-    "mid": 4.642,
-    "premium": 4.979,
-    "diesel": 6.026,
+    "regular": 4.339,
+    "mid": 4.728,
+    "premium": 5.071,
+    "diesel": 6.138,
     "history": [
       {
         "date": "2026-04-13",
@@ -7411,15 +7477,19 @@
       {
         "date": "2026-09-07",
         "regular": 4.26
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.339
       }
     ]
   },
   "US_OH": {
     "label": "Ohio avg",
-    "regular": 3.885,
-    "mid": 4.233,
-    "premium": 4.541,
-    "diesel": 5.132,
+    "regular": 4.147,
+    "mid": 4.518,
+    "premium": 4.847,
+    "diesel": 5.478,
     "history": [
       {
         "date": "2026-04-13",
@@ -7509,15 +7579,19 @@
       {
         "date": "2026-09-07",
         "regular": 3.885
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 4.147
       }
     ]
   },
   "US_TX": {
     "label": "Texas avg",
-    "regular": 3.618,
-    "mid": 3.946,
-    "premium": 4.23,
-    "diesel": 4.937,
+    "regular": 3.806,
+    "mid": 4.151,
+    "premium": 4.45,
+    "diesel": 5.194,
     "history": [
       {
         "date": "2026-04-13",
@@ -7607,15 +7681,19 @@
       {
         "date": "2026-09-07",
         "regular": 3.618
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 3.806
       }
     ]
   },
   "US_WA": {
     "label": "Washington avg",
-    "regular": 5.483,
-    "mid": 5.977,
-    "premium": 6.408,
-    "diesel": 6.615,
+    "regular": 5.503,
+    "mid": 5.999,
+    "premium": 6.431,
+    "diesel": 6.639,
     "history": [
       {
         "date": "2026-04-13",
@@ -7705,6 +7783,10 @@
       {
         "date": "2026-09-07",
         "regular": 5.483
+      },
+      {
+        "date": "2026-09-14",
+        "regular": 5.503
       }
     ]
   }
