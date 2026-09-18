@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "lastUpdated": "2026-09-17",
+    "lastUpdated": "2026-09-18",
     "note": "Regional gas-price averages, refreshed daily by scripts/update-prices.mjs (manual or via GitHub Actions). Each entry stores headline prices in the country's native unit ($/gallon US for the US, $/litre everywhere else) plus a recent-history array used for the on-page chart.",
     "sources": {
       "US": "https://www.eia.gov/petroleum/gasdiesel/",
@@ -132,10 +132,10 @@
     ]
   },
   "CA": {
-    "regular": 1.889,
-    "mid": 2.073,
-    "premium": 2.212,
-    "diesel": 1.994,
+    "regular": 1.919,
+    "mid": 2.106,
+    "premium": 2.247,
+    "diesel": 2.026,
     "label": "Canada avg",
     "history": [
       {
@@ -553,15 +553,15 @@
       },
       {
         "date": "2026-09-22",
-        "regular": 1.889
+        "regular": 1.919
       }
     ]
   },
   "CA_AB": {
-    "regular": 1.725,
-    "mid": 1.867,
-    "premium": 2.011,
-    "diesel": 1.795,
+    "regular": 1.765,
+    "mid": 1.91,
+    "premium": 2.057,
+    "diesel": 1.836,
     "label": "Alberta avg",
     "history": [
       {
@@ -979,15 +979,15 @@
       },
       {
         "date": "2026-09-22",
-        "regular": 1.725
+        "regular": 1.765
       }
     ]
   },
   "CA_BC": {
-    "regular": 2.047,
-    "mid": 2.218,
-    "premium": 2.344,
-    "diesel": 2.101,
+    "regular": 2.062,
+    "mid": 2.234,
+    "premium": 2.361,
+    "diesel": 2.116,
     "label": "BC avg",
     "history": [
       {
@@ -1405,15 +1405,15 @@
       },
       {
         "date": "2026-09-22",
-        "regular": 2.047
+        "regular": 2.062
       }
     ]
   },
   "CA_MB": {
-    "regular": 1.753,
-    "mid": 1.931,
-    "premium": 2.073,
-    "diesel": 1.863,
+    "regular": 1.812,
+    "mid": 1.996,
+    "premium": 2.143,
+    "diesel": 1.926,
     "label": "Manitoba avg",
     "history": [
       {
@@ -1831,7 +1831,7 @@
       },
       {
         "date": "2026-09-22",
-        "regular": 1.753
+        "regular": 1.812
       }
     ]
   },
@@ -2262,10 +2262,10 @@
     ]
   },
   "CA_NL": {
-    "regular": 2.133,
-    "mid": 2.333,
-    "premium": 2.475,
-    "diesel": 2.243,
+    "regular": 2.166,
+    "mid": 2.369,
+    "premium": 2.513,
+    "diesel": 2.278,
     "label": "Newfoundland avg",
     "history": [
       {
@@ -2683,7 +2683,7 @@
       },
       {
         "date": "2026-09-22",
-        "regular": 2.133
+        "regular": 2.166
       }
     ]
   },
@@ -3114,10 +3114,10 @@
     ]
   },
   "CA_NT": {
-    "regular": 1.784,
-    "mid": 1.939,
-    "premium": 2.052,
-    "diesel": 1.873,
+    "regular": 1.792,
+    "mid": 1.948,
+    "premium": 2.061,
+    "diesel": 1.881,
     "label": "NWT avg",
     "history": [
       {
@@ -3535,7 +3535,7 @@
       },
       {
         "date": "2026-09-22",
-        "regular": 1.784
+        "regular": 1.792
       }
     ]
   },
@@ -3547,10 +3547,10 @@
     "label": "Nunavut avg"
   },
   "CA_ON": {
-    "regular": 1.818,
-    "mid": 1.962,
-    "premium": 2.093,
-    "diesel": 1.889,
+    "regular": 1.848,
+    "mid": 1.994,
+    "premium": 2.127,
+    "diesel": 1.92,
     "label": "Ontario avg",
     "history": [
       {
@@ -3968,7 +3968,7 @@
       },
       {
         "date": "2026-09-22",
-        "regular": 1.818
+        "regular": 1.848
       }
     ]
   },
@@ -4399,10 +4399,10 @@
     ]
   },
   "CA_QC": {
-    "regular": 1.977,
-    "mid": 2.126,
-    "premium": 2.262,
-    "diesel": 2.048,
+    "regular": 1.993,
+    "mid": 2.143,
+    "premium": 2.28,
+    "diesel": 2.064,
     "label": "Quebec avg",
     "history": [
       {
@@ -4820,15 +4820,15 @@
       },
       {
         "date": "2026-09-22",
-        "regular": 1.977
+        "regular": 1.993
       }
     ]
   },
   "CA_SK": {
-    "regular": 1.798,
-    "mid": 1.991,
-    "premium": 2.137,
-    "diesel": 1.912,
+    "regular": 1.838,
+    "mid": 2.035,
+    "premium": 2.185,
+    "diesel": 1.955,
     "label": "Saskatchewan avg",
     "history": [
       {
@@ -5246,7 +5246,7 @@
       },
       {
         "date": "2026-09-22",
-        "regular": 1.798
+        "regular": 1.838
       }
     ]
   },
