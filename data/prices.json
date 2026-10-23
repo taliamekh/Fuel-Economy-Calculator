@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "lastUpdated": "2026-10-22",
+    "lastUpdated": "2026-10-23",
     "note": "Regional gas-price averages, refreshed daily by scripts/update-prices.mjs (manual or via GitHub Actions). Each entry stores headline prices in the country's native unit ($/gallon US for the US, $/litre everywhere else) plus a recent-history array used for the on-page chart.",
     "sources": {
       "US": "https://www.eia.gov/petroleum/gasdiesel/",
@@ -157,10 +157,10 @@
     ]
   },
   "CA": {
-    "regular": 1.799,
-    "mid": 1.976,
-    "premium": 2.106,
-    "diesel": 1.899,
+    "regular": 1.797,
+    "mid": 1.974,
+    "premium": 2.104,
+    "diesel": 1.897,
     "label": "Canada avg",
     "history": [
       {
@@ -578,15 +578,15 @@
       },
       {
         "date": "2026-10-27",
-        "regular": 1.799
+        "regular": 1.797
       }
     ]
   },
   "CA_AB": {
-    "regular": 1.57,
-    "mid": 1.689,
-    "premium": 1.819,
-    "diesel": 1.622,
+    "regular": 1.603,
+    "mid": 1.725,
+    "premium": 1.857,
+    "diesel": 1.656,
     "label": "Alberta avg",
     "history": [
       {
@@ -1004,15 +1004,15 @@
       },
       {
         "date": "2026-10-27",
-        "regular": 1.57
+        "regular": 1.603
       }
     ]
   },
   "CA_BC": {
-    "regular": 2.06,
-    "mid": 2.232,
-    "premium": 2.357,
-    "diesel": 2.114,
+    "regular": 2.058,
+    "mid": 2.23,
+    "premium": 2.355,
+    "diesel": 2.112,
     "label": "BC avg",
     "history": [
       {
@@ -1430,15 +1430,15 @@
       },
       {
         "date": "2026-10-27",
-        "regular": 2.06
+        "regular": 2.058
       }
     ]
   },
   "CA_MB": {
-    "regular": 1.676,
-    "mid": 1.846,
-    "premium": 1.982,
-    "diesel": 1.782,
+    "regular": 1.712,
+    "mid": 1.886,
+    "premium": 2.025,
+    "diesel": 1.82,
     "label": "Manitoba avg",
     "history": [
       {
@@ -1856,7 +1856,7 @@
       },
       {
         "date": "2026-10-27",
-        "regular": 1.676
+        "regular": 1.712
       }
     ]
   },
@@ -2287,10 +2287,10 @@
     ]
   },
   "CA_NL": {
-    "regular": 2.058,
-    "mid": 2.251,
-    "premium": 2.387,
-    "diesel": 2.162,
+    "regular": 2.039,
+    "mid": 2.23,
+    "premium": 2.365,
+    "diesel": 2.142,
     "label": "Newfoundland avg",
     "history": [
       {
@@ -2708,7 +2708,7 @@
       },
       {
         "date": "2026-10-27",
-        "regular": 2.058
+        "regular": 2.039
       }
     ]
   },
@@ -3139,10 +3139,10 @@
     ]
   },
   "CA_NT": {
-    "regular": 1.784,
-    "mid": 1.939,
-    "premium": 2.05,
-    "diesel": 1.871,
+    "regular": 1.792,
+    "mid": 1.948,
+    "premium": 2.059,
+    "diesel": 1.879,
     "label": "NWT avg",
     "history": [
       {
@@ -3560,7 +3560,7 @@
       },
       {
         "date": "2026-10-27",
-        "regular": 1.784
+        "regular": 1.792
       }
     ]
   },
@@ -3572,10 +3572,10 @@
     "label": "Nunavut avg"
   },
   "CA_ON": {
-    "regular": 1.727,
-    "mid": 1.858,
-    "premium": 1.982,
-    "diesel": 1.787,
+    "regular": 1.708,
+    "mid": 1.838,
+    "premium": 1.96,
+    "diesel": 1.767,
     "label": "Ontario avg",
     "history": [
       {
@@ -3993,7 +3993,7 @@
       },
       {
         "date": "2026-10-27",
-        "regular": 1.727
+        "regular": 1.708
       }
     ]
   },
@@ -4424,10 +4424,10 @@
     ]
   },
   "CA_QC": {
-    "regular": 1.891,
-    "mid": 2.026,
-    "premium": 2.154,
-    "diesel": 1.949,
+    "regular": 1.878,
+    "mid": 2.013,
+    "premium": 2.14,
+    "diesel": 1.936,
     "label": "Quebec avg",
     "history": [
       {
@@ -4845,15 +4845,15 @@
       },
       {
         "date": "2026-10-27",
-        "regular": 1.891
+        "regular": 1.878
       }
     ]
   },
   "CA_SK": {
-    "regular": 1.765,
-    "mid": 1.95,
-    "premium": 2.099,
-    "diesel": 1.878,
+    "regular": 1.763,
+    "mid": 1.948,
+    "premium": 2.097,
+    "diesel": 1.876,
     "label": "Saskatchewan avg",
     "history": [
       {
@@ -5271,7 +5271,7 @@
       },
       {
         "date": "2026-10-27",
-        "regular": 1.765
+        "regular": 1.763
       }
     ]
   },
