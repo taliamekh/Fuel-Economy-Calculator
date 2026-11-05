@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "lastUpdated": "2026-11-04",
+    "lastUpdated": "2026-11-05",
     "note": "Regional gas-price averages, refreshed daily by scripts/update-prices.mjs (manual or via GitHub Actions). Each entry stores headline prices in the country's native unit ($/gallon US for the US, $/litre everywhere else) plus a recent-history array used for the on-page chart.",
     "sources": {
       "US": "https://www.eia.gov/petroleum/gasdiesel/",
@@ -4435,9 +4435,9 @@
   },
   "CA_QC": {
     "regular": 1.812,
-    "mid": 1.937,
-    "premium": 2.059,
-    "diesel": 1.862,
+    "mid": 1.936,
+    "premium": 2.058,
+    "diesel": 1.861,
     "label": "Quebec avg",
     "history": [
       {
