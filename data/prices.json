@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "lastUpdated": "2026-11-07",
+    "lastUpdated": "2026-11-08",
     "note": "Regional gas-price averages, refreshed daily by scripts/update-prices.mjs (manual or via GitHub Actions). Each entry stores headline prices in the country's native unit ($/gallon US for the US, $/litre everywhere else) plus a recent-history array used for the on-page chart.",
     "sources": {
       "US": "https://www.eia.gov/petroleum/gasdiesel/",
@@ -594,9 +594,9 @@
   },
   "CA_AB": {
     "regular": 1.433,
-    "mid": 1.544,
-    "premium": 1.66,
-    "diesel": 1.483,
+    "mid": 1.543,
+    "premium": 1.659,
+    "diesel": 1.482,
     "label": "Alberta avg",
     "history": [
       {
@@ -3583,9 +3583,9 @@
   },
   "CA_ON": {
     "regular": 1.628,
-    "mid": 1.747,
-    "premium": 1.865,
-    "diesel": 1.681,
+    "mid": 1.748,
+    "premium": 1.866,
+    "diesel": 1.682,
     "label": "Ontario avg",
     "history": [
       {
