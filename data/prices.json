@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "lastUpdated": "2026-11-12",
+    "lastUpdated": "2026-11-13",
     "note": "Regional gas-price averages, refreshed daily by scripts/update-prices.mjs (manual or via GitHub Actions). Each entry stores headline prices in the country's native unit ($/gallon US for the US, $/litre everywhere else) plus a recent-history array used for the on-page chart.",
     "sources": {
       "US": "https://www.eia.gov/petroleum/gasdiesel/",
@@ -172,10 +172,10 @@
     ]
   },
   "CA": {
-    "regular": 1.595,
-    "mid": 1.752,
-    "premium": 1.87,
-    "diesel": 1.684,
+    "regular": 1.589,
+    "mid": 1.745,
+    "premium": 1.863,
+    "diesel": 1.678,
     "label": "Canada avg",
     "history": [
       {
@@ -593,15 +593,15 @@
       },
       {
         "date": "2026-11-17",
-        "regular": 1.595
+        "regular": 1.589
       }
     ]
   },
   "CA_AB": {
-    "regular": 1.301,
-    "mid": 1.4,
-    "premium": 1.507,
-    "diesel": 1.345,
+    "regular": 1.29,
+    "mid": 1.388,
+    "premium": 1.494,
+    "diesel": 1.334,
     "label": "Alberta avg",
     "history": [
       {
@@ -1019,15 +1019,15 @@
       },
       {
         "date": "2026-11-17",
-        "regular": 1.301
+        "regular": 1.29
       }
     ]
   },
   "CA_BC": {
-    "regular": 1.85,
-    "mid": 2.004,
-    "premium": 2.116,
-    "diesel": 1.899,
+    "regular": 1.846,
+    "mid": 2,
+    "premium": 2.111,
+    "diesel": 1.895,
     "label": "BC avg",
     "history": [
       {
@@ -1445,15 +1445,15 @@
       },
       {
         "date": "2026-11-17",
-        "regular": 1.85
+        "regular": 1.846
       }
     ]
   },
   "CA_MB": {
-    "regular": 1.447,
-    "mid": 1.596,
-    "premium": 1.711,
-    "diesel": 1.537,
+    "regular": 1.433,
+    "mid": 1.581,
+    "premium": 1.694,
+    "diesel": 1.522,
     "label": "Manitoba avg",
     "history": [
       {
@@ -1871,15 +1871,15 @@
       },
       {
         "date": "2026-11-17",
-        "regular": 1.447
+        "regular": 1.433
       }
     ]
   },
   "CA_NB": {
-    "regular": 1.674,
-    "mid": 1.843,
-    "premium": 1.97,
-    "diesel": 1.77,
+    "regular": 1.654,
+    "mid": 1.821,
+    "premium": 1.946,
+    "diesel": 1.749,
     "label": "New Brunswick avg",
     "history": [
       {
@@ -2297,7 +2297,7 @@
       },
       {
         "date": "2026-11-17",
-        "regular": 1.674
+        "regular": 1.654
       }
     ]
   },
@@ -2728,10 +2728,10 @@
     ]
   },
   "CA_NS": {
-    "regular": 1.648,
-    "mid": 1.806,
-    "premium": 1.926,
-    "diesel": 1.743,
+    "regular": 1.647,
+    "mid": 1.805,
+    "premium": 1.925,
+    "diesel": 1.742,
     "label": "Nova Scotia avg",
     "history": [
       {
@@ -3149,7 +3149,7 @@
       },
       {
         "date": "2026-11-17",
-        "regular": 1.648
+        "regular": 1.647
       }
     ]
   },
@@ -3587,10 +3587,10 @@
     "label": "Nunavut avg"
   },
   "CA_ON": {
-    "regular": 1.551,
-    "mid": 1.665,
-    "premium": 1.777,
-    "diesel": 1.602,
+    "regular": 1.542,
+    "mid": 1.655,
+    "premium": 1.766,
+    "diesel": 1.592,
     "label": "Ontario avg",
     "history": [
       {
@@ -4008,7 +4008,7 @@
       },
       {
         "date": "2026-11-17",
-        "regular": 1.551
+        "regular": 1.542
       }
     ]
   },
@@ -4439,10 +4439,10 @@
     ]
   },
   "CA_QC": {
-    "regular": 1.752,
-    "mid": 1.868,
-    "premium": 1.987,
-    "diesel": 1.797,
+    "regular": 1.743,
+    "mid": 1.858,
+    "premium": 1.976,
+    "diesel": 1.787,
     "label": "Quebec avg",
     "history": [
       {
@@ -4860,15 +4860,15 @@
       },
       {
         "date": "2026-11-17",
-        "regular": 1.752
+        "regular": 1.743
       }
     ]
   },
   "CA_SK": {
-    "regular": 1.402,
-    "mid": 1.549,
-    "premium": 1.667,
-    "diesel": 1.491,
+    "regular": 1.399,
+    "mid": 1.546,
+    "premium": 1.663,
+    "diesel": 1.488,
     "label": "Saskatchewan avg",
     "history": [
       {
@@ -5286,7 +5286,7 @@
       },
       {
         "date": "2026-11-17",
-        "regular": 1.402
+        "regular": 1.399
       }
     ]
   },
